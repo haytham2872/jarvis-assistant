@@ -2,7 +2,6 @@ import asyncio
 import logging
 import threading
 import numpy as np
-import sounddevice as sd
 
 from backend.audio import transcriber
 
@@ -28,6 +27,10 @@ class SpeechToText:
         )
 
     def _record_until_silence(self) -> np.ndarray:
+        # Imported here, not at the top: loading sounddevice starts PortAudio, which raises on
+        # a machine with PulseAudio installed but not running (a server, a CI runner), and
+        # only the desk microphone needs it.
+        import sounddevice as sd
         recorded: list[np.ndarray] = []
         silent_chunks = 0
         silence_limit = int(SILENCE_DURATION * SAMPLE_RATE / 512)

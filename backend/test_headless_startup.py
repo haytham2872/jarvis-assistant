@@ -18,7 +18,6 @@ import pytest
 _PROBE = r"""
 import os, sys, json
 os.environ["NO_TTS"] = "1"
-os.environ.setdefault("MODEL_MODE", "claude")
 sys.path.insert(0, os.getcwd())
 import backend.main as m
 print(json.dumps({
@@ -75,3 +74,15 @@ def test_main_no_longer_builds_audio_at_import_time():
     assert m._stt is None
     assert callable(m.get_stt)
     assert callable(m.get_tts)
+
+
+def test_the_speech_module_loads_without_portaudio():
+    """GitHub's runner has PulseAudio installed but not running, so loading sounddevice
+    raised there, and so did importing backend.audio.stt, though only the desk microphone
+    records. The transcriber and the module itself must load without it."""
+    code = ("import sys, os; sys.path.insert(0, os.getcwd()); import backend.audio.stt; "
+            "print('sounddevice' in sys.modules)")
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                            timeout=300)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.strip().splitlines()[-1] == "False"

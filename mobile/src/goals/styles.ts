@@ -1,0 +1,31 @@
+import { StyleSheet } from 'react-native';
+import { color, font, radius, space } from '../theme/tokens';
+
+export const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: color.bg },
+  header: { flexDirection: 'row', gap: space.s3, alignItems: 'center', padding: space.s4 },
+  title: { color: color.tHi, fontSize: font.lg, fontWeight: '600', flex: 1 },
+  content: { padding: space.s4, gap: space.s4 },
+  card: { padding: space.s4, gap: space.s3, borderRadius: radius.lg + space.s3 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space.s3 },
+  spread: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.s3 },
+  grow: { flex: 1, gap: space.s1 },
+  heading: { color: color.tHi, fontSize: font.read, fontWeight: '600' },
+  body: { color: color.tHi, fontSize: font.body, lineHeight: 22 },
+  dim: { color: color.tMid, fontSize: font.label, lineHeight: 19 },
+  section: { color: color.tMid, fontSize: font.micro, textTransform: 'uppercase', letterSpacing: 1.3, fontWeight: '700' },
+  status: { color: color.stIdle, fontSize: font.micro, fontWeight: '700', textTransform: 'uppercase' },
+  error: { color: color.err, fontSize: font.label, lineHeight: 19 },
+  said: { color: color.ok, fontSize: font.label, lineHeight: 19 },
+  buttons: { flexDirection: 'row', flexWrap: 'wrap', gap: space.s2 },
+  button: { minHeight: 44, paddingHorizontal: space.s4, justifyContent: 'center', borderRadius: radius.pill },
+  buttonText: { color: color.tHi, fontWeight: '600', fontSize: font.label },
+  input: { minHeight: 48, maxHeight: 220, color: color.tHi, backgroundColor: color.bgElev, padding: space.s3,
+    borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: color.borderBright, fontSize: font.body },
+  off: { opacity: 0.45 },
+  pressed: { opacity: 0.7 },
+  link: { color: color.stIdle, fontSize: font.body, lineHeight: 22 },
+  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.65)' },
+  sheet: { maxHeight: '85%', backgroundColor: color.bgElev, borderTopLeftRadius: radius.lg + space.s4,
+    borderTopRightRadius: radius.lg + space.s4, borderColor: color.borderBright, borderWidth: StyleSheet.hairlineWidth },
+});

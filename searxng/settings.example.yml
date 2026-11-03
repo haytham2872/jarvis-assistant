@@ -1,0 +1,16 @@
+# JARVIS — SearXNG configuration. The setup scripts copy this to settings.yml (not in git)
+# with a random secret_key; settings.yml is mounted read-only into the jarvis-searxng container.
+# Minimal delta over the image defaults:
+#   - json output format enabled (the /search?format=json API is disabled by default)
+#   - limiter (bot detection) off — only local backend traffic hits this instance
+#   - secret_key set (the container refuses the default placeholder)
+use_default_settings: true
+
+server:
+  secret_key: "__GENERATED_BY_SETUP__"
+  limiter: false
+
+search:
+  formats:
+    - html
+    - json

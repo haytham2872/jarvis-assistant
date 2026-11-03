@@ -1,0 +1,85 @@
+/* ============================================================
+   JARVIS · THE INSTRUMENT — Design Tokens
+   Single source of truth. Every color/space/type/motion value
+   comes from here. No hardcoded values anywhere else.
+   ============================================================ */
+:root{
+  /* ---------- BACKGROUNDS ---------- */
+  --bg:            #060a10;   /* app base, near-black cool */
+  --bg-elev:       #0a0f17;   /* raised regions, top strip */
+  --surface:       #0e1521;   /* panels, meters, input */
+  --surface-2:     #131c2b;   /* nested cards, hover */
+  --surface-3:     #1a2433;   /* active / selected row */
+  --veil:         rgba(4,7,12,.72); /* dpanel backdrop */
+
+  /* ---------- BORDERS ---------- */
+  --border:        #1c2838;   /* default hairline */
+  --border-bright: #2a3a4f;   /* emphasized / focused */
+  --tick:          #34465c;   /* bezel corner ticks, crosshairs */
+
+  /* ---------- TEXT TIERS ---------- */
+  --t-hi:   #dce6f0;          /* primary — response, values */
+  --t-mid:  #8595a8;          /* secondary — labels, meta */
+  --t-dim:  #4b5a6e;          /* tertiary — inactive, hints */
+  --t-faint:#33414f;          /* quaternary — flatlined */
+
+  /* ---------- FOUR STATE ACCENTS ---------- */
+  --st-idle:      #2fb6f0;
+  --st-listening: #ffb347;
+  --st-thinking:  #a06cd5;
+  --st-speaking:  #dcf3ff;
+  /* dim companions for inactive pips / fills */
+  --st-idle-dim:      #14506b;
+  --st-listening-dim: #6b4f1f;
+  --st-thinking-dim:  #4a3460;
+  --st-speaking-dim:  #5b727f;
+
+  /* ---------- SEMANTIC ---------- */
+  --ok:    #46c28a;   /* step done, connected */
+  --err:   #e5604d;   /* step failed, error banner */
+  --warn:  #ffb347;   /* reconnecting, retry */
+  --run:   #2fb6f0;   /* step running */
+
+  /* ---------- MOOD (tone → hue) ---------- */
+  --mood-contemplative: #5a8dd6;
+  --mood-curious:       #2fb6f0;
+  --mood-melancholic:   #7a6cd5;
+  --mood-sardonic:      #7d92a6;
+  --mood-engaged:       #e89a4f;
+  --mood-restless:      #e5604d;
+
+  /* ---------- SPACING (4px base) ---------- */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px;
+  --s5:24px; --s6:32px; --s7:48px; --s8:64px;
+
+  /* ---------- RADII ---------- */
+  --r-sm:4px; --r-md:7px; --r-lg:10px; --r-pill:999px;
+
+  /* ---------- TYPE ---------- */
+  --font-sans:'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono:'IBM Plex Mono', ui-monospace, monospace;
+  --fs-micro:11px;   /* tick labels */
+  --fs-label:13px;   /* mono labels, chips */
+  --fs-meta:14px;    /* badges, transcript meta */
+  --fs-body:15px;    /* conversation body */
+  --fs-read:18px;    /* active streaming response */
+  --fs-lg:22px;
+  --fs-xl:30px;
+  --ls-label:.18em;  /* tracked mono labels */
+  --ls-tight:-.01em;
+
+  /* ---------- SHADOWS / GLOWS ---------- */
+  --elev-1: 0 2px 8px rgba(0,0,0,.4);
+  --elev-2: 0 18px 50px -18px rgba(0,0,0,.7);
+  --dpanel-shadow: 0 40px 120px -30px rgba(0,0,0,.85);
+  --glow-soft: 0 0 24px;
+  --glow-hard: 0 0 12px;
+
+  /* ---------- MOTION ---------- */
+  --ease-out:  cubic-bezier(.2,.7,.2,1);
+  --ease-in-out: cubic-bezier(.5,0,.2,1);
+  --dur-fast: 140ms;
+  --dur-base: 240ms;
+  --dur-slow: 420ms;
+  --dur-state: 600ms;   /* pipeline state cross-fade */
+}

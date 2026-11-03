@@ -1,0 +1,35 @@
+@import './styles/tokens.css';
+@import './styles/instrument.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--t-hi);
+  font-family: var(--font-sans);
+  overflow: hidden;
+  user-select: none;
+  /* No window-wide drag region: it swallows mouse/scroll events on all children
+     (scroll containers, scrollbars). Only the top strip is the drag handle. */
+  -webkit-app-region: no-drag;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+button, input { -webkit-app-region: no-drag; }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }

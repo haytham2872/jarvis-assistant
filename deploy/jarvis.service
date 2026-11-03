@@ -1,0 +1,25 @@
+# systemd unit for JARVIS. scripts/install_service.sh fills in __USER__ and __DIR__ and
+# installs it as /etc/systemd/system/jarvis.service.
+#
+# "+" runs the container start with root rights, so the user needs no docker group.
+# User= is required: without it the service runs as root, whose home has none of the models
+# setup downloaded into this user's ~/.cache, and with HF_HUB_OFFLINE=1 it cannot fetch them.
+[Unit]
+Description=JARVIS assistant
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStartPre=+/usr/bin/docker compose -f __DIR__/mem0/docker-compose.yml up -d
+ExecStart=__DIR__/.venv/bin/python -m backend.main --no-wake
+Restart=always
+RestartSec=10
+# SIGTERM -> graceful shutdown: the open conversation is consolidated (letter, portrait,
+# queue) before the process exits. Give it time before the kill.
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

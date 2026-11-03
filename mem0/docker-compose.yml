@@ -1,0 +1,40 @@
+services:
+  qdrant:
+    # Pinned with qdrant-client in requirements.txt: the two move together.
+    # A new server version can migrate the storage, so back up first (DEPLOY.md).
+    image: qdrant/qdrant:v1.17.1
+    container_name: jarvis-qdrant
+    ports:
+      # Loopback-only: on a public VM an unbound 6333 would expose
+      # the entire memory database to the internet. The backend only ever
+      # connects via localhost, so nothing is lost on any host.
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    # No healthcheck: block on purpose. The qdrant/qdrant image ships no HTTP
+    # client at all (no curl, no wget, no python/nc, and /bin/sh is dash --
+    # no /dev/tcp support either), so a "CMD curl ..." healthcheck can NEVER
+    # succeed regardless of whether Qdrant is actually healthy -- confirmed
+    # live (2026-08-27): FailingStreak 126/126 since container start while
+    # Qdrant was serving real mem0/jarvis_semantic/jarvis_threads traffic
+    # successfully the entire time. A permanently-false "unhealthy" label is
+    # worse than no label -- it actively misleads troubleshooting (this is
+    # exactly what happened). Real readiness is checked from the HOST side
+    # instead, in scripts/_internal/docker.ps1, which hits :6333/readyz
+    # directly with Invoke-WebRequest (a client that actually exists).
+
+  # Self-hosted web search (metasearch) — primary backend for web_browse.
+  # Stateless; settings.yml enables the JSON API and disables the bot limiter.
+  searxng:
+    # Pinned so every install runs the version settings.example.yml was tested with.
+    image: searxng/searxng:2026.6.8-f3fab143b
+    container_name: jarvis-searxng
+    ports:
+      - "127.0.0.1:8088:8080"
+    volumes:
+      - ../searxng/settings.yml:/etc/searxng/settings.yml:ro
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:

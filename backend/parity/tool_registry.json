@@ -1,0 +1,1360 @@
+{
+  "background_allowed_tools": [
+    "calendar_action",
+    "code_graph",
+    "fetch_page",
+    "gmail_action",
+    "memory_search",
+    "memory_timeline",
+    "portfolio",
+    "skill",
+    "vault_list",
+    "vault_read",
+    "vault_write",
+    "web_browse"
+  ],
+  "discord_command_help": [
+    [
+      "/new",
+      "start a brand-new session from the next message"
+    ],
+    [
+      "/stop",
+      "stop the answer I'm writing right now"
+    ],
+    [
+      "/pace [off|low|normal|high]",
+      "show or set the research loop's pace"
+    ],
+    [
+      "/status",
+      "uptime, the model, background tasks, memory health, cost"
+    ],
+    [
+      "/cost",
+      "session cost breakdown by model"
+    ],
+    [
+      "/about",
+      "the showcase pitch (who I am, what I do)"
+    ],
+    [
+      "/brief [HH:MM|on|off|now]",
+      "show/set the morning brief, or send it now"
+    ],
+    [
+      "/rules [drop N]",
+      "the standing rules I hold myself to, or drop one"
+    ],
+    [
+      "/record",
+      "my forecasting track record: score, calibration, recent calls"
+    ],
+    [
+      "/pause [hours] [all]",
+      "stop my own work for a while (all: reminders and the brief too)"
+    ],
+    [
+      "/resume",
+      "end the pause and list what it skipped"
+    ],
+    [
+      "/activity",
+      "what I'm running, waiting on and have scheduled"
+    ],
+    [
+      "/plan [week|stats]",
+      "today's plan and the week, and how each block went"
+    ],
+    [
+      "/goals [id]",
+      "the goals I'm working on, or one in detail"
+    ],
+    [
+      "/goal <id> pause|resume|cancel",
+      "pause, resume or stop one goal"
+    ],
+    [
+      "/portfolio [ticker|stats]",
+      "recorded holdings, dated value/P&L, theses and their history"
+    ],
+    [
+      "/trace",
+      "what my tools did in our conversation"
+    ],
+    [
+      "/skills",
+      "my procedures for tasks that come back"
+    ],
+    [
+      "/skill <name> [details]",
+      "run one now; /skill export <name> sends its file, /skill undo takes back a change"
+    ],
+    [
+      "/commands",
+      "this list"
+    ]
+  ],
+  "discord_commands": [
+    "/about",
+    "/activity",
+    "/brief",
+    "/commands",
+    "/cost",
+    "/goal",
+    "/goals",
+    "/new",
+    "/pace",
+    "/pause",
+    "/plan",
+    "/portfolio",
+    "/record",
+    "/resume",
+    "/rules",
+    "/skill",
+    "/skills",
+    "/status",
+    "/stop",
+    "/trace"
+  ],
+  "tool_count": 33,
+  "tools": [
+    {
+      "name": "ask_clarifying_question",
+      "params": {
+        "question": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "question"
+      ]
+    },
+    {
+      "name": "calendar_action",
+      "params": {
+        "action": [
+          "string",
+          [
+            "check_free_busy",
+            "create_event",
+            "delete_event",
+            "list_events",
+            "update_event"
+          ]
+        ],
+        "date": [
+          "string",
+          null
+        ],
+        "days": [
+          "integer",
+          null
+        ],
+        "description": [
+          "string",
+          null
+        ],
+        "duration_minutes": [
+          "integer",
+          null
+        ],
+        "end_time": [
+          "string",
+          null
+        ],
+        "event_id": [
+          "string",
+          null
+        ],
+        "location": [
+          "string",
+          null
+        ],
+        "max_results": [
+          "integer",
+          null
+        ],
+        "quote": [
+          "string",
+          null
+        ],
+        "start_time": [
+          "string",
+          null
+        ],
+        "title": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "check_background_tasks",
+      "params": {},
+      "required": []
+    },
+    {
+      "name": "code_graph",
+      "params": {
+        "action": [
+          "string",
+          [
+            "affected",
+            "explain",
+            "god_nodes",
+            "path",
+            "query"
+          ]
+        ],
+        "depth": [
+          "integer",
+          null
+        ],
+        "query": [
+          "string",
+          null
+        ],
+        "target": [
+          "string",
+          null
+        ],
+        "top": [
+          "integer",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "correct_memory",
+      "params": {
+        "claim": [
+          "string",
+          null
+        ],
+        "correction": [
+          "string",
+          null
+        ],
+        "terms": [
+          "array",
+          null
+        ]
+      },
+      "required": [
+        "claim",
+        "correction"
+      ]
+    },
+    {
+      "name": "fetch_page",
+      "params": {
+        "links": [
+          "boolean",
+          null
+        ],
+        "url": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "url"
+      ]
+    },
+    {
+      "name": "forecast",
+      "params": {
+        "action": [
+          "string",
+          [
+            "add",
+            "list",
+            "record",
+            "resolve"
+          ]
+        ],
+        "check_query": [
+          "string",
+          null
+        ],
+        "claim": [
+          "string",
+          null
+        ],
+        "criteria": [
+          "string",
+          null
+        ],
+        "domain": [
+          "string",
+          [
+            "markets",
+            "other",
+            "people",
+            "politics",
+            "science",
+            "sports",
+            "tech"
+          ]
+        ],
+        "forecast_id": [
+          "integer",
+          null
+        ],
+        "method": [
+          "string",
+          [
+            "conversation",
+            "gmail",
+            "web"
+          ]
+        ],
+        "outcome": [
+          "string",
+          [
+            "no",
+            "void",
+            "yes"
+          ]
+        ],
+        "probability": [
+          "string",
+          null
+        ],
+        "resolve_by": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "get_self_model",
+      "params": {},
+      "required": []
+    },
+    {
+      "name": "gmail_action",
+      "params": {
+        "action": [
+          "string",
+          [
+            "list_inbox",
+            "read_email",
+            "search_emails",
+            "send_email"
+          ]
+        ],
+        "body": [
+          "string",
+          null
+        ],
+        "email_id": [
+          "string",
+          null
+        ],
+        "max_results": [
+          "integer",
+          null
+        ],
+        "query": [
+          "string",
+          null
+        ],
+        "quote": [
+          "string",
+          null
+        ],
+        "subject": [
+          "string",
+          null
+        ],
+        "to": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "goal",
+      "params": {
+        "action": [
+          "string",
+          [
+            "answer",
+            "budget",
+            "cancel",
+            "list",
+            "pause",
+            "propose",
+            "resume",
+            "show",
+            "start",
+            "steer"
+          ]
+        ],
+        "artifact_name": [
+          "string",
+          null
+        ],
+        "artifact_revision": [
+          "integer",
+          null
+        ],
+        "budget_usd": [
+          "number",
+          null
+        ],
+        "criteria": [
+          "array",
+          null
+        ],
+        "deadline": [
+          "string",
+          null
+        ],
+        "evidence_id": [
+          "string",
+          null
+        ],
+        "goal_id": [
+          "string",
+          null
+        ],
+        "proposal_id": [
+          "string",
+          null
+        ],
+        "quote": [
+          "string",
+          null
+        ],
+        "text": [
+          "string",
+          null
+        ],
+        "title": [
+          "string",
+          null
+        ],
+        "wait_id": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "memory_search",
+      "params": {
+        "days_back": [
+          "integer",
+          null
+        ],
+        "kind": [
+          "string",
+          [
+            "all",
+            "exchange",
+            "fact",
+            "skill",
+            "vault"
+          ]
+        ],
+        "query": [
+          "string",
+          null
+        ],
+        "top_k": [
+          "integer",
+          null
+        ]
+      },
+      "required": [
+        "query"
+      ]
+    },
+    {
+      "name": "memory_timeline",
+      "params": {
+        "days_back": [
+          "integer",
+          null
+        ],
+        "end_date": [
+          "string",
+          null
+        ],
+        "start_date": [
+          "string",
+          null
+        ]
+      },
+      "required": []
+    },
+    {
+      "name": "notion_action",
+      "params": {
+        "action": [
+          "string",
+          [
+            "add_idea",
+            "add_task",
+            "complete_task",
+            "list_tasks",
+            "search"
+          ]
+        ],
+        "content": [
+          "string",
+          null
+        ],
+        "due": [
+          "string",
+          null
+        ],
+        "priority": [
+          "string",
+          [
+            "High",
+            "Low",
+            "Medium"
+          ]
+        ],
+        "query": [
+          "string",
+          null
+        ],
+        "status": [
+          "string",
+          null
+        ],
+        "tags": [
+          "array",
+          null
+        ],
+        "title": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "person_profile",
+      "params": {
+        "action": [
+          "string",
+          [
+            "create",
+            "decline",
+            "fill",
+            "gaps",
+            "list",
+            "read",
+            "update"
+          ]
+        ],
+        "aliases": [
+          "array",
+          null
+        ],
+        "edits": [
+          "array",
+          null
+        ],
+        "kind": [
+          "string",
+          [
+            "historical",
+            "known",
+            "public"
+          ]
+        ],
+        "name": [
+          "string",
+          null
+        ],
+        "relation": [
+          "string",
+          null
+        ],
+        "section": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "portfolio",
+      "params": {
+        "action": [
+          "string",
+          [
+            "add_condition",
+            "close_thesis",
+            "confirm_split",
+            "correct_trade",
+            "dismiss_split",
+            "history",
+            "import_candidates",
+            "propose_trade",
+            "record",
+            "record_trade",
+            "revise_thesis",
+            "set_thesis",
+            "show"
+          ]
+        ],
+        "criterion": [
+          "string",
+          null
+        ],
+        "direction": [
+          "string",
+          [
+            "right_if",
+            "wrong_if"
+          ]
+        ],
+        "due_date": [
+          "string",
+          null
+        ],
+        "horizon": [
+          "string",
+          null
+        ],
+        "kind": [
+          "string",
+          [
+            "dated_event",
+            "metric",
+            "price_above",
+            "price_below"
+          ]
+        ],
+        "level": [
+          "string",
+          null
+        ],
+        "probability": [
+          "string",
+          null
+        ],
+        "quote": [
+          "string",
+          null
+        ],
+        "source": [
+          "string",
+          [
+            "my analysis",
+            "owner"
+          ]
+        ],
+        "split_date": [
+          "string",
+          null
+        ],
+        "status": [
+          "string",
+          [
+            "abandoned",
+            "broken",
+            "closed"
+          ]
+        ],
+        "symbol": [
+          "string",
+          null
+        ],
+        "thesis_id": [
+          "integer",
+          null
+        ],
+        "trade_id": [
+          "integer",
+          null
+        ],
+        "trades": [
+          "array",
+          null
+        ],
+        "why": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "research_queue",
+      "params": {
+        "action": [
+          "string",
+          null
+        ],
+        "angle": [
+          "string",
+          null
+        ],
+        "reason": [
+          "string",
+          null
+        ],
+        "subject": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "run_in_background",
+      "params": {
+        "task": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "task"
+      ]
+    },
+    {
+      "name": "schedule_night_task",
+      "params": {
+        "after": [
+          "string",
+          null
+        ],
+        "task": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "task"
+      ]
+    },
+    {
+      "name": "schedule_reminder",
+      "params": {
+        "action": [
+          "string",
+          [
+            "add",
+            "cancel",
+            "list"
+          ]
+        ],
+        "message": [
+          "string",
+          null
+        ],
+        "repeat": [
+          "string",
+          [
+            "daily",
+            "once"
+          ]
+        ],
+        "when": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "schedule_task",
+      "params": {
+        "action": [
+          "string",
+          [
+            "add",
+            "cancel",
+            "list",
+            "update"
+          ]
+        ],
+        "repeat": [
+          "string",
+          [
+            "daily",
+            "once",
+            "weekdays",
+            "weekly"
+          ]
+        ],
+        "skill": [
+          "string",
+          null
+        ],
+        "task": [
+          "string",
+          null
+        ],
+        "timezone": [
+          "string",
+          null
+        ],
+        "until": [
+          "string",
+          null
+        ],
+        "when": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "skill",
+      "params": {
+        "about": [
+          "string",
+          null
+        ],
+        "action": [
+          "string",
+          [
+            "export",
+            "learn",
+            "list",
+            "patch",
+            "retire",
+            "save",
+            "undo",
+            "view"
+          ]
+        ],
+        "checks": [
+          "array",
+          null
+        ],
+        "day": [
+          "string",
+          null
+        ],
+        "description": [
+          "string",
+          null
+        ],
+        "edits": [
+          "array",
+          null
+        ],
+        "learn_from": [
+          "string",
+          [
+            "document",
+            "last_task",
+            "past"
+          ]
+        ],
+        "name": [
+          "string",
+          null
+        ],
+        "pitfalls": [
+          "array",
+          null
+        ],
+        "reason": [
+          "string",
+          null
+        ],
+        "source": [
+          "string",
+          [
+            "learned",
+            "taught"
+          ]
+        ],
+        "steps": [
+          "array",
+          null
+        ],
+        "tools": [
+          "array",
+          null
+        ],
+        "when_to_use": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "spotify_action",
+      "params": {
+        "action": [
+          "string",
+          [
+            "devices",
+            "liked",
+            "next",
+            "now_playing",
+            "pause",
+            "play",
+            "previous",
+            "queue",
+            "recent",
+            "resume",
+            "search",
+            "shuffle",
+            "skip",
+            "top",
+            "volume"
+          ]
+        ],
+        "device": [
+          "string",
+          null
+        ],
+        "limit": [
+          "integer",
+          null
+        ],
+        "query": [
+          "string",
+          null
+        ],
+        "time_range": [
+          "string",
+          [
+            "long_term",
+            "medium_term",
+            "short_term"
+          ]
+        ],
+        "uri": [
+          "string",
+          null
+        ],
+        "volume": [
+          "integer",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "standing_instruction",
+      "params": {
+        "action": [
+          "string",
+          [
+            "add",
+            "list",
+            "retire"
+          ]
+        ],
+        "replaces": [
+          "string",
+          null
+        ],
+        "restates": [
+          "string",
+          null
+        ],
+        "rule": [
+          "string",
+          null
+        ],
+        "rule_id": [
+          "string",
+          null
+        ],
+        "scope": [
+          "string",
+          [
+            "always",
+            "desk",
+            "discord"
+          ]
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "vault_list",
+      "params": {
+        "folder": [
+          "string",
+          [
+            "attachments",
+            "conversations",
+            "conversations/significant",
+            "creative",
+            "drafts",
+            "letters",
+            "people",
+            "self",
+            "shared",
+            "topics"
+          ]
+        ]
+      },
+      "required": []
+    },
+    {
+      "name": "vault_read",
+      "params": {
+        "filename": [
+          "string",
+          null
+        ],
+        "folder": [
+          "string",
+          [
+            "attachments",
+            "conversations",
+            "conversations/significant",
+            "creative",
+            "drafts",
+            "letters",
+            "people",
+            "root",
+            "self",
+            "shared",
+            "topics"
+          ]
+        ],
+        "section": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "filename",
+        "folder"
+      ]
+    },
+    {
+      "name": "vault_send",
+      "params": {
+        "filename": [
+          "string",
+          null
+        ],
+        "folder": [
+          "string",
+          [
+            "conversations",
+            "conversations/significant",
+            "creative",
+            "drafts",
+            "letters",
+            "people",
+            "root",
+            "self",
+            "shared",
+            "skills",
+            "topics"
+          ]
+        ]
+      },
+      "required": [
+        "filename",
+        "folder"
+      ]
+    },
+    {
+      "name": "vault_share",
+      "params": {
+        "filename": [
+          "string",
+          null
+        ],
+        "source_folder": [
+          "string",
+          [
+            "conversations",
+            "conversations/significant",
+            "creative",
+            "drafts",
+            "letters",
+            "people",
+            "self",
+            "topics"
+          ]
+        ]
+      },
+      "required": [
+        "filename",
+        "source_folder"
+      ]
+    },
+    {
+      "name": "vault_write",
+      "params": {
+        "content": [
+          "string",
+          null
+        ],
+        "filename": [
+          "string",
+          null
+        ],
+        "folder": [
+          "string",
+          [
+            "conversations",
+            "conversations/significant",
+            "creative",
+            "drafts",
+            "letters",
+            "self",
+            "shared",
+            "topics"
+          ]
+        ]
+      },
+      "required": [
+        "content",
+        "filename",
+        "folder"
+      ]
+    },
+    {
+      "name": "vault_write_queue",
+      "params": {
+        "content": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "content"
+      ]
+    },
+    {
+      "name": "watch_action",
+      "params": {
+        "action": [
+          "string",
+          [
+            "add",
+            "cancel",
+            "list"
+          ]
+        ],
+        "condition": [
+          "string",
+          null
+        ],
+        "every": [
+          "string",
+          [
+            "6h",
+            "day",
+            "hour"
+          ]
+        ],
+        "method": [
+          "string",
+          [
+            "calendar",
+            "gmail",
+            "web"
+          ]
+        ],
+        "query": [
+          "string",
+          null
+        ],
+        "repeat": [
+          "boolean",
+          null
+        ],
+        "subject": [
+          "string",
+          null
+        ],
+        "until": [
+          "string",
+          null
+        ],
+        "watch_id": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "web_browse",
+      "params": {
+        "kind": [
+          "string",
+          [
+            "news",
+            "papers",
+            "web"
+          ]
+        ],
+        "recent_days": [
+          "integer",
+          null
+        ],
+        "sites": [
+          "string",
+          null
+        ],
+        "task": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "task"
+      ]
+    },
+    {
+      "name": "web_research",
+      "params": {
+        "depth": [
+          "string",
+          [
+            "deep",
+            "standard"
+          ]
+        ],
+        "question": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "question"
+      ]
+    },
+    {
+      "name": "week_plan",
+      "params": {
+        "action": [
+          "string",
+          [
+            "add",
+            "apply",
+            "change",
+            "propose",
+            "remove",
+            "report",
+            "show",
+            "sync",
+            "undo"
+          ]
+        ],
+        "day": [
+          "string",
+          null
+        ],
+        "end": [
+          "string",
+          null
+        ],
+        "items": [
+          "array",
+          null
+        ],
+        "kind": [
+          "string",
+          null
+        ],
+        "minutes": [
+          "integer",
+          null
+        ],
+        "near": [
+          "string",
+          null
+        ],
+        "plan_id": [
+          "integer",
+          null
+        ],
+        "prefer": [
+          "string",
+          [
+            "afternoon",
+            "evening",
+            "morning"
+          ]
+        ],
+        "quote": [
+          "string",
+          null
+        ],
+        "reason": [
+          "string",
+          null
+        ],
+        "rules": [
+          "object",
+          null
+        ],
+        "said": [
+          "string",
+          null
+        ],
+        "start": [
+          "string",
+          null
+        ],
+        "to_day": [
+          "string",
+          null
+        ],
+        "week": [
+          "string",
+          null
+        ]
+      },
+      "required": [
+        "action"
+      ]
+    }
+  ]
+}

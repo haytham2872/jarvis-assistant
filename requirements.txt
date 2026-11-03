@@ -1,0 +1,64 @@
+# Core
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+websockets==13.1
+python-dotenv==1.0.1
+
+# Audio
+sounddevice==0.5.0
+numpy==1.26.4
+scipy==1.13.1
+openwakeword==0.6.0; sys_platform == "win32"  # desk-only wake word; its tflite-runtime
+                                               # dependency has no Linux/Python-3.12 wheel,
+                                               # and a headless server always runs --no-wake
+                                               # (backend/main.py imports WakeWordDetector
+                                               # lazily so it's never required there)
+faster-whisper==1.0.3              # the fallback transcriber (backend/audio/transcriber.py)
+onnx-asr==0.12.0                   # Parakeet TDT 0.6B v3, voice notes in English and French;
+                                   # runs on the onnxruntime fastembed already installs, no torch.
+                                   # Model downloaded once per host:
+                                   #   HF_HUB_OFFLINE=0 python -m backend.audio.transcriber --download
+av>=12.0                           # decodes Discord's OGG/Opus voice notes
+
+# LLM
+openai>=1.0.0
+
+# Memory (mem0ai library + Qdrant vector DB in Docker, see mem0/docker-compose.yml)
+mem0ai[nlp]==2.0.1               # nlp: spaCy, for entity extraction and BM25 lemmas
+qdrant-client==1.17.1             # matches the qdrant/qdrant image in mem0/docker-compose.yml
+sentence-transformers>=2.2.0
+fastembed>=0.3.0
+
+# TTS
+edge-tts>=6.1.9
+kokoro>=0.9.4
+misaki[en]>=0.9.4
+soundfile>=0.12.0
+
+# Discord bridge
+discord.py>=2.3.2
+
+# Tools
+httpx>=0.27.0
+exchange_calendars==4.13.2        # portfolio sessions: holidays, early closes and DST
+trafilatura>=1.6.0
+pypdf>=4.0.0
+# Images and documents the owner sends (backend/brain/attachments.py, backend/tools/documents.py).
+# Not MarkItDown: its file-type detector pins onnxruntime 1.20, below what Parakeet uses.
+Pillow>=10.0
+pillow-heif==1.1.1          # iPhone photos (HEIC) from the phone app and the share sheet
+pypdfium2==5.13.0                  # renders scanned PDF pages for the vision model
+python-docx==1.2.0
+openpyxl==3.1.5
+python-pptx==1.0.2
+ddgs>=9.0.0
+google-auth==2.35.0
+google-auth-oauthlib==1.2.1
+google-api-python-client==2.149.0
+spotipy>=2.24.0
+
+# Utils
+aiofiles==24.1.0
+
+# Tests
+pytest>=8.0.0

@@ -1,0 +1,20 @@
+# What the code graph (graphify-out/graph.json) is allowed to see.
+# Syntax is gitignore's. Read by `graphify update` / `/graphify .`.
+
+# --- JARVIS's own space — never indexed into the code graph ----------------
+# The vault is his, not a source tree: letters to himself, the owner's
+# portrait, self-reflections, creative fragments. It already has its own
+# retrieval path (the jarvis_semantic Qdrant index, via memory_search and
+# read_relevant_topic). Restructuring it into a second, flattened graph
+# outside the vault serves nothing and crosses a line the rest of the
+# codebase is careful about.
+jarvis-vault/
+
+# --- Generated / operational — not source ---------------------------------
+graphify-out/
+backups/
+logs/
+node_modules/
+dist/
+.venv/
+__pycache__/

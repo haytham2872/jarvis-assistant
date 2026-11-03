@@ -1,0 +1,192 @@
+// Conversation mode's screen (slice 5): the loop of listening, sending, hearing the answer and
+// listening again, with the recorder and the app's state faked. Kept outside src/app.
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+
+import { ConversationMode } from '../chat/ConversationMode';
+
+const mockRec = {
+  start: jest.fn(), finish: jest.fn(), cancel: jest.fn(), active: false, ms: 0, metering: -55 as number | undefined,
+};
+jest.mock('../voice/useRecorder', () => ({ useRecorder: () => mockRec }));
+jest.mock('expo-keep-awake', () => ({ useKeepAwake: () => undefined }));
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 59, bottom: 34, left: 0, right: 0 }) }));
+const mockOrbProps: Record<string, unknown>[] = [];
+jest.mock('../orb/NeuralOrb', () => ({ NeuralOrb: (p: Record<string, unknown>) => { mockOrbProps.push(p); return null; } }));
+
+const mockState: { requests: Record<string, { state: string; text?: string | null; answer?: string | null }> } = { requests: {} };
+const mockSpeaker = { state: { source: null as string | null, phase: 'idle' as 'idle' | 'loading' | 'speaking' }, stop: jest.fn() };
+const mockApp = {
+  chat: { state: mockState as typeof mockState & { mood?: unknown }, warmUp: jest.fn(), sendVoiceTurn: jest.fn() },
+  speaker: mockSpeaker,
+  levels: { push: jest.fn(), subscribe: jest.fn() },
+  setRecording: jest.fn(),
+};
+jest.mock('../state/AppContext', () => ({ useApp: () => mockApp }));
+
+let t = 1_000_000;
+let ui: Awaited<ReturnType<typeof render>>;
+const onClose = jest.fn();
+
+/** Feed `db` for `ms` at the recorder's 100 ms pace. */
+async function level(db: number, ms: number) {
+  for (let i = 0; i < ms; i += 100) {
+    t += 100;
+    jest.setSystemTime(t);
+    mockRec.metering = db + (i % 200 === 0 ? 0 : 0.01);      // a new value each sample, as iOS sends
+    await ui.rerender(<ConversationMode onClose={onClose} />);
+    await act(async () => {});
+  }
+}
+
+async function utterance() {
+  await level(-55, 700);     // the room
+  await level(-25, 1200);    // him
+  await level(-55, 1600);    // done
+}
+
+beforeEach(() => {
+  jest.useFakeTimers();
+  t = 1_000_000;
+  jest.setSystemTime(t);
+  jest.clearAllMocks();
+  mockState.requests = {};
+  mockSpeaker.state = { source: null, phase: 'idle' };
+  mockRec.active = false;
+  mockRec.metering = -55;
+  mockRec.start.mockImplementation(async () => { mockRec.active = true; return null; });
+  mockRec.finish.mockImplementation(async () => { mockRec.active = false; return { uri: 'file:///rec.m4a', ms: 2500, bytes: 9000 }; });
+  mockRec.cancel.mockImplementation(async () => { mockRec.active = false; });
+});
+
+afterEach(() => {
+  jest.useRealTimers();
+});
+
+async function open() {
+  ui = await render(<ConversationMode onClose={onClose} />);
+  await act(async () => {});
+}
+
+const rerender = async () => {
+  await ui.rerender(<ConversationMode onClose={onClose} />);
+  await act(async () => {});
+};
+
+it('listens, sends when he stops, hears the answer, and listens again', async () => {
+  mockApp.chat.sendVoiceTurn.mockResolvedValue({ requestId: 'r1', line: null });
+  await open();
+  expect(mockRec.start).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId('conversation-state').props.children).toBe('Go ahead');
+  await utterance();
+  expect(mockApp.chat.sendVoiceTurn).toHaveBeenCalledWith('file:///rec.m4a', 2500, true);
+  expect(screen.getByTestId('conversation-state').props.children).toBe('Thinking…');
+
+  mockState.requests.r1 = { state: 'answered', text: 'what is NVDA at', answer: 'NVDA closed at $165.37.' };
+  mockSpeaker.state = { source: 'req:r1', phase: 'speaking' };
+  await rerender();
+  expect(screen.getByTestId('conversation-state').props.children).toBe('Speaking');
+  expect(screen.getByText('NVDA closed at $165.37.')).toBeTruthy();
+  expect(mockRec.start).toHaveBeenCalledTimes(1);           // never records over his voice
+
+  mockSpeaker.state = { source: null, phase: 'idle' };
+  await rerender();
+  expect(mockRec.start).toHaveBeenCalledTimes(2);           // the next turn
+});
+
+it('"that\'s all" ends it once the answer has been said', async () => {
+  mockApp.chat.sendVoiceTurn.mockResolvedValue({ requestId: 'r2', line: null });
+  await open();
+  await utterance();
+  mockState.requests.r2 = { state: 'answered', text: "Thanks, that's all", answer: 'Any time.' };
+  mockSpeaker.state = { source: 'req:r2', phase: 'speaking' };
+  await rerender();
+  mockSpeaker.state = { source: null, phase: 'idle' };
+  await rerender();
+  expect(mockRec.start).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId('conversation-state').props.children).toBe('Done');
+});
+
+it('silence from the start stops listening and says why', async () => {
+  await open();
+  await level(-55, 8500);
+  expect(mockRec.cancel).toHaveBeenCalled();
+  expect(mockApp.chat.sendVoiceTurn).not.toHaveBeenCalled();
+  expect(screen.getByText(/stopped listening/)).toBeTruthy();
+});
+
+it('a failed turn ends the conversation and says so', async () => {
+  mockApp.chat.sendVoiceTurn.mockResolvedValue({ requestId: 'r3', line: null });
+  await open();
+  await utterance();
+  mockState.requests.r3 = { state: 'failed', text: 'hm' };
+  await rerender();
+  expect(screen.getByText(/could not answer that one/)).toBeTruthy();
+  expect(mockRec.start).toHaveBeenCalledTimes(1);
+});
+
+it('a recording the server heard nothing in is tried again, twice at most', async () => {
+  mockApp.chat.sendVoiceTurn.mockResolvedValue({ requestId: 'r4', line: 'I heard nothing in that recording' });
+  await open();
+  await utterance();
+  expect(mockRec.start).toHaveBeenCalledTimes(2);
+  await utterance();
+  expect(mockRec.start).toHaveBeenCalledTimes(2);
+  expect(screen.getByText('I heard nothing in that recording')).toBeTruthy();
+});
+
+it('a spoken answer that never starts is not waited for forever', async () => {
+  mockApp.chat.sendVoiceTurn.mockResolvedValue({ requestId: 'r5', line: null });
+  await open();
+  await utterance();
+  mockState.requests.r5 = { state: 'answered', text: 'hi', answer: 'Hello.' };
+  await rerender();
+  expect(mockRec.start).toHaveBeenCalledTimes(1);
+  await act(async () => { t += 7000; jest.setSystemTime(t); jest.advanceTimersByTime(7000); });
+  await rerender();
+  expect(mockRec.start).toHaveBeenCalledTimes(2);
+});
+
+it('End stops the recording and closes', async () => {
+  await open();
+  await fireEvent.press(screen.getByLabelText('End the conversation'));
+  await act(async () => {});
+  expect(mockRec.cancel).toHaveBeenCalled();
+  expect(mockSpeaker.stop).toHaveBeenCalled();
+  expect(onClose).toHaveBeenCalled();
+});
+
+it('tapping the orb while he speaks cuts him off', async () => {
+  mockApp.chat.sendVoiceTurn.mockResolvedValue({ requestId: 'r6', line: null });
+  await open();
+  await utterance();
+  mockState.requests.r6 = { state: 'answered', text: 'tell me', answer: 'A long answer.' };
+  mockSpeaker.state = { source: 'req:r6', phase: 'speaking' };
+  await rerender();
+  mockSpeaker.stop.mockClear();
+  await fireEvent.press(screen.getByLabelText('Stop JARVIS and speak'));
+  expect(mockSpeaker.stop).toHaveBeenCalled();
+});
+
+it('the microphone being off ends it with the way to fix it', async () => {
+  mockRec.start.mockResolvedValue('permission');
+  await open();
+  expect(screen.getByText(/microphone is off for Expo Go/)).toBeTruthy();
+});
+
+it('his voice is stopped before the microphone opens', async () => {
+  const order: string[] = [];
+  mockSpeaker.stop.mockImplementation(() => order.push('stop'));
+  mockRec.start.mockImplementation(async () => { order.push('record'); mockRec.active = true; return null; });
+  await open();
+  expect(order.slice(0, 2)).toEqual(['stop', 'record']);
+});
+
+it('the orb fills the screen, tinted by his mood, and is the one that buzzes', async () => {
+  mockApp.chat.state.mood = { tone: 'curious', intensity: 0.5 };
+  mockOrbProps.length = 0;
+  await open();
+  const last = mockOrbProps[mockOrbProps.length - 1];
+  expect(last.size).toBeGreaterThanOrEqual(160);
+  expect(last).toMatchObject({ mood: { tone: 'curious', intensity: 0.5 }, haptics: true, mode: 'listening' });
+  delete mockApp.chat.state.mood;
+});

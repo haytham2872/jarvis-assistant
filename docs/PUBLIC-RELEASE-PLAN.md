@@ -74,9 +74,11 @@ the private repository keeps running its owner's own JARVIS, unchanged.
    - The `public` branch is one commit with no parent, holding the same files as `main`.
      gitleaks finds nothing in it, and neither does the personal-terms search. It is what
      gets pushed; `main` and its history stay on this machine.
-5. **Showcase.** README (pitch, demo GIF, architecture diagram, measured highlights),
-   `docs/engineering-log.md` (about twelve real incidents, no personal details), GitHub
-   Actions running `pytest backend/` for a badge, MIT license, push protection on.
+5. **Showcase** (done, except the demo GIF). `README.md` (what it does, the trust model, a
+   Mermaid architecture diagram, measured highlights), `docs/engineering-log.md` (twelve real
+   problems, each with its measurement, no personal details), `.github/workflows/tests.yml`
+   (the backend suite on Ubuntu, Python 3.12, CPU-only PyTorch), the MIT license. Published
+   at github.com/haytham2872/jarvis-assistant from the `public` branch.
 
 ## Recommendations (to schedule, not yet decided)
 

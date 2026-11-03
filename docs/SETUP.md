@@ -21,7 +21,7 @@ This guide sets it up on a Linux machine, the always-on setup it is built for. O
 ## 1. Install
 
 ```bash
-git clone <this repository's URL> jarvis
+git clone https://github.com/haytham2872/jarvis-assistant.git jarvis
 cd jarvis
 bash scripts/setup.sh
 ```

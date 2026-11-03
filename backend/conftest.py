@@ -240,9 +240,11 @@ def _guard_real_vault():
     before = _vault_fingerprint(root)
     yield
     after = _vault_fingerprint(root)
+    # A missing vault and an empty one hold the same files. On a fresh clone there is no
+    # jarvis-vault/ yet, and building a prompt creates its empty folders.
+    before, after = before or {}, after or {}
     if before == after:
         return
-    before, after = before or {}, after or {}
     changed = sorted(k for k in before.keys() & after.keys() if before[k] != after[k])
     created = sorted(after.keys() - before.keys())
     deleted = sorted(before.keys() - after.keys())

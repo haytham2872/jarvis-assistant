@@ -54,7 +54,7 @@ the private repository keeps running its owner's own JARVIS, unchanged.
    - Guarded by `backend/test_install_files.py` (every setting the code reads is
      documented and vice versa, a copied example keeps every default, the service and
      setup files) and owner-varied self-model caps.
-4. **Secrets gate before the first push** (in progress).
+4. **Secrets gate before the first push** (done).
    - Done: the Qdrant and SearXNG images and `qdrant-client` are pinned to tested versions;
      `/claim <code>` makes the first owner without reading ids out of a log;
      `brain/claude.py` is `brain/engine.py` (the conversation engine), since it no longer has
@@ -69,7 +69,11 @@ the private repository keeps running its owner's own JARVIS, unchanged.
      about 1,700 times, his email, the old SearXNG key and the Spotify client id; a later one
      holds his surname. The first push goes from a new orphan branch holding only the final
      tree; `main` with its history stays local.
-   - Still to do: gitleaks itself (its download needs the owner's approval).
+   - gitleaks 8.21.2: no leak in the tracked files (its 16 hits are file hashes in the ignored
+     `graphify-out/cache/`), one in the history (the old SearXNG key in `50f764c`).
+   - The `public` branch is one commit with no parent, holding the same files as `main`.
+     gitleaks finds nothing in it, and neither does the personal-terms search. It is what
+     gets pushed; `main` and its history stay on this machine.
 5. **Showcase.** README (pitch, demo GIF, architecture diagram, measured highlights),
    `docs/engineering-log.md` (about twelve real incidents, no personal details), GitHub
    Actions running `pytest backend/` for a badge, MIT license, push protection on.

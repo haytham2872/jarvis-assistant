@@ -29,6 +29,18 @@ from pathlib import Path
 import pytest
 
 
+def pytest_xdist_auto_num_workers(config):
+    """`-n auto` (pytest.ini): every core for the suite or a folder, one process for a
+    single test file or test, where starting 8 workers costs more than it saves, and one
+    process with --testmon, which selects tests in a single process."""
+    if config.getoption("testmon", default=False):
+        return 0
+    args = [a for a in config.args if a]
+    if args and all(a.split("::")[0].endswith(".py") for a in args):
+        return 0
+    return None
+
+
 @pytest.fixture(autouse=True)
 def _isolated_runtime_database(tmp_path, monkeypatch):
     """Point the SQLite runtime store at this test's own throwaway file.

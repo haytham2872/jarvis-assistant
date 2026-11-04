@@ -70,3 +70,6 @@ jarvis-vault/
 # real owner portrait and vault notes, never committed.
 .jarvis_bench/
 .jarvis_uploads/
+
+# pytest-testmon: which code each test touched (rebuilt locally, never shared)
+.testmondata*

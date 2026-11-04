@@ -62,3 +62,5 @@ aiofiles==24.1.0
 
 # Tests
 pytest>=8.0.0
+pytest-xdist==3.8.0               # parallel test runs (pytest.ini: -n auto)
+pytest-testmon==2.3.0             # reruns only the tests your change affects: pytest --testmon

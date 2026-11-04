@@ -118,8 +118,16 @@ The Linux server is described in [DEPLOY.md](DEPLOY.md); flags in [RUNNING.md](R
 ### Tests
 
 ```bash
-pytest backend/
+pytest                                      # the whole suite, in parallel on every core
+pytest --testmon                            # only the tests your change affects
+pytest backend/brain/test_research.py       # one file, in one process
 ```
+
+`pytest.ini` runs in parallel (pytest-xdist, `-n auto`); `backend/conftest.py` keeps a single
+file or test, and `--testmon`, in one process. pytest-testmon records which code each test
+runs (`.testmondata`, gitignored) and reruns only the tests whose code changed. It cannot see
+files a test reads (`docs/SELF_MODEL.md`, `.env.example`, `tool_registry.json`), so it is
+for working; the full suite runs before a commit.
 
 Tests live next to their modules. No test reaches a real model, Qdrant, the vault or the
 SQLite database: `backend/conftest.py` redirects every store and sets the test owner

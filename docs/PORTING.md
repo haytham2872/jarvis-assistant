@@ -80,7 +80,7 @@ A ported change that should affect them is applied to them by hand.
 
 ## Watermark
 
-Last private commit reviewed: `a6925e7`
+Last private commit reviewed: `d565cd5`
 
 ## Log
 
@@ -89,5 +89,6 @@ since then is listed, newest first.
 
 | Private | What | Here |
 |---|---|---|
+| `d565cd5` | The suite in 2 minutes: one slow test fixed, parallel by default, testmon | ported (CLAUDE.md's test section rewritten here) |
 | `a6925e7` | Qdrant and its client pinned to the versions the private server runs (1.19) | not ported: this project keeps its own pins (Qdrant 1.17.1 with its client) |
 | `171b835` | OpenRouter only, and fixes found while making this copy | nothing to port: it came from here |

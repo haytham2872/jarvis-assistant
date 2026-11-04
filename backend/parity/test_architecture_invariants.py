@@ -11,6 +11,7 @@ that is why it is pinned rather than trusted.
 import ast
 import pathlib
 import re
+from collections import Counter
 
 import pytest
 
@@ -152,12 +153,16 @@ def test_no_unreferenced_module_level_functions():
     # or `pool_size` is exercised there and is part of the operator surface A09 pins.
     # What this catches is code referenced by NOTHING AT ALL -- which is exactly the
     # shape of everything removed in A10.
+    # Every identifier counted once: a function name is all word characters, so its count
+    # here equals a \bname\b search. Searching the whole blob once per function took 404 s
+    # of a 14-minute suite run (4 November 2026); this takes under 2 s.
     blob = "\n".join(p.read_text(encoding="utf-8", errors="replace")
                      for p in ROOT.rglob("*.py"))
+    words = Counter(re.findall(r"\w+", blob))
     dead = [f"{where}::{name}" for name, where in sorted(defined.items())
             if not name.startswith("__")
             and name not in DECORATED_ROUTES
-            and len(re.findall(rf"\b{re.escape(name)}\b", blob)) <= 1]
+            and words[name] <= 1]
     assert dead == [], f"unreferenced functions: {dead}"
 
 

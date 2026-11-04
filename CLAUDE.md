@@ -110,7 +110,6 @@ prompt and tool schemas tell him. In the same change as the code:
 .\scripts\run.ps1                   # full desk system (Vite dev server)
 .\scripts\run.ps1 -BackendOnly      # backend only
 .\scripts\run.ps1 -NoUI             # terminal client, no Electron, no speech
-.\scripts\run.ps1 -Model openrouter # OpenRouter's DeepSeek models
 ```
 
 The Linux server is described in [DEPLOY.md](DEPLOY.md); flags in [RUNNING.md](RUNNING.md).

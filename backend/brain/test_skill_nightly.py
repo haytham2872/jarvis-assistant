@@ -169,7 +169,7 @@ def test_the_brief_carries_the_line_and_offers_follow_its_delivery():
     src = inspect.getsource(chronos.compose_brief)
     assert "_collect_skills_overnight(now)" in src
     send = inspect.getsource(chronos._send_brief)
-    assert send.index("_mark_briefed(now, covered)") < send.index("await _offer_skill_routines()")
+    assert send.index("_mark_briefed(now, covered") < send.index("await _offer_skill_routines()")
 
 
 def test_yesterdays_report_is_not_todays_line(model):

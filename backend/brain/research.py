@@ -300,6 +300,7 @@ _FRESH_DECAY_DAYS      = 3.0    # how fast conversational heat cools
 _STALE_SATURATION_DAYS = 14.0   # how long until an unresearched topic maxes its pull
 _FRESHNESS_WEIGHT      = 0.65
 _STALENESS_WEIGHT      = 0.35
+_UNREAD_STOP_DAYS      = 30     # a topic not opened on the phone this long stops being researched
 
 
 def freshness(similarity: float, significance: float, age_days: float) -> float:
@@ -328,9 +329,17 @@ def staleness(days_since_researched: Optional[float]) -> float:
     return 1.0 - math.exp(-days / _STALE_SATURATION_DAYS)
 
 
-def score_topic(freshness_val: float, staleness_val: float) -> float:
-    """Fused selection score. Freshness-dominant by design."""
-    return _FRESHNESS_WEIGHT * freshness_val + _STALENESS_WEIGHT * staleness_val
+def reading(days_unread: Optional[float]) -> float:
+    """Damping on the staleness pull from phone reading, in [0, 1].
+    None = no reading signal yet = 1.0; falls linearly to 0 at _UNREAD_STOP_DAYS."""
+    if days_unread is None:
+        return 1.0
+    return max(0.0, 1.0 - days_unread / _UNREAD_STOP_DAYS)
+
+
+def score_topic(freshness_val: float, staleness_val: float, read: float = 1.0) -> float:
+    """Fused selection score. Freshness-dominant by design; staleness is scaled by `read`."""
+    return _FRESHNESS_WEIGHT * freshness_val + _STALENESS_WEIGHT * staleness_val * read
 
 
 # ---------------------------------------------------------------------------
@@ -658,12 +667,18 @@ def _aggregate_family(open_members: list[dict]) -> dict:
     most_recent = min(researched, key=lambda m: m["days_since"]) if researched else None
     max_fresh = max(m["freshness"] for m in open_members)
     stale = staleness(most_overdue["days_since"])
+    read_members = [m for m in open_members if m.get("days_unread") is not None]
+    most_read = min(read_members, key=lambda m: m["days_unread"]) if read_members else None
+    days_unread = most_read["days_unread"] if most_read else None
     return {
         "file":         most_overdue["file"],
         "title":        most_overdue["title"],
         "freshness":    max_fresh,
         "staleness":    stale,
-        "score":        score_topic(max_fresh, stale),
+        "score":        score_topic(max_fresh, stale, reading(days_unread)),
+        "days_unread":  days_unread,
+        "last_opened":  most_read["last_opened"] if most_read else None,
+        "since":        most_read["since"] if most_read else None,
         "last_angle":   most_recent["last_angle"] if most_recent else None,
         "digest":       most_overdue["digest"],
         "open_question": most_overdue.get("open_question", ""),
@@ -1228,6 +1243,19 @@ def _first_open_question(body: str) -> str:
     return ""
 
 
+def _note_created_ts(content: str) -> float:
+    """Creation time from `date:` / `created:` frontmatter (YYYY-MM-DD...), else 0.0."""
+    from backend.brain.semindex import _frontmatter_fields
+    fields = _frontmatter_fields(content, ("date", "created"))
+    for raw in (fields.get("date"), fields.get("created")):
+        try:
+            d = datetime.date.fromisoformat((raw or "").strip().strip("\"'")[:10])
+            return datetime.datetime(d.year, d.month, d.day, tzinfo=datetime.timezone.utc).timestamp()
+        except ValueError:
+            continue
+    return 0.0
+
+
 async def _gather_candidates(now: float) -> list[dict]:
     """Score every topics/ note not in cooldown, grouped into subject families.
 
@@ -1246,6 +1274,14 @@ async def _gather_candidates(now: float) -> list[dict]:
     except Exception:
         files = []
 
+    try:
+        from backend.storage import note_opens
+        opened = note_opens.last_opened("topics")
+        tracking_since = note_opens.first_opened()
+    except Exception as e:
+        log.debug("research: note opens unavailable: %s", e)
+        opened, tracking_since = {}, None
+
     by_file: dict[str, dict] = {}
     query_texts: dict[str, str] = {}
     for path in files:
@@ -1258,7 +1294,14 @@ async def _gather_candidates(now: float) -> list[dict]:
         researched_ts = _parse_last_researched(content)
         days_since = (now - researched_ts) / 86400.0 if researched_ts else None
         closed = _parse_research_closed(content)
+        last_open = opened.get(path.name)
+        since = None
+        if tracking_since is not None:
+            since = max(last_open or 0.0, tracking_since, _note_created_ts(content))
         by_file[path.name] = {
+            "days_unread": (now - since) / 86400.0 if since is not None else None,
+            "last_opened": last_open,
+            "since":       since,
             "file":       path.name,
             "title":      title,
             "days_since": days_since,
@@ -1303,6 +1346,7 @@ async def _gather_candidates(now: float) -> list[dict]:
 
     failures = _load_state().get(_FAILURES_KEY, {})
     candidates: list[dict] = []
+    stopped: list[dict] = []
     for member_files in families:
         open_members = [by_file[f] for f in member_files if not by_file[f]["closed"]]
         if not open_members:
@@ -1311,8 +1355,14 @@ async def _gather_candidates(now: float) -> list[dict]:
             continue
         if any(in_failure_hold(failures.get(m["file"]), now) for m in open_members):
             continue   # failing repeatedly: held back, see _FAIL_HOLD_S
-        candidates.append(_aggregate_family(open_members))
+        cand = _aggregate_family(open_members)
+        if reading(cand["days_unread"]) == 0.0 and cand["score"] < _MIN_SCORE_TO_ATTEMPT:
+            stopped.append({"file": cand["file"], "title": cand["title"],
+                            "last_opened": cand["last_opened"], "since": cand["since"]})
+            continue   # unread for _UNREAD_STOP_DAYS and nothing live in conversation
+        candidates.append(cand)
 
+    _update_state(lambda st: st.__setitem__("stopped_topics", stopped))
     candidates.sort(key=lambda c: c["score"], reverse=True)
     return candidates
 

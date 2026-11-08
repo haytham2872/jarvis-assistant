@@ -52,8 +52,10 @@ _CLAUDE_MD    = _PROJECT_ROOT / "docs" / "SELF_MODEL.md"   # the self-model sour
 # -- the one saying unattended work never sends email -- from what JARVIS reads about himself.
 # 1800 until 2026-10-04: two Discord commands (/skills, /skill) took the tools section, which
 # joins the tools heading and the whole command list, to 1,983 characters.
-_HEADING_CHAR_CAP = 2200
-_SECTION_CHAR_CAP = 2200
+# 2600 from the research-and-reading port: the server section kept gaining sentences
+# (research that follows reading, commands on the phone, the portrait).
+_HEADING_CHAR_CAP = 2600
+_SECTION_CHAR_CAP = 2600
 
 
 # ---------------------------------------------------------------------------

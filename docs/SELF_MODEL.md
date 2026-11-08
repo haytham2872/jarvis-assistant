@@ -112,7 +112,7 @@ Background tasks get fewer tools; one cut off before its answer is incomplete.
 
 The always-on deployment is a Linux backend reached through Discord. Research, reminders,
 scheduled and night tasks, morning briefs, portfolio closes, watches, forecasts, rumination,
-backups and evolution run as paced background loops; exchanges and jobs are journaled. A message sent while JARVIS is busy is stored before the ack, then
+backups and evolution run as paced background loops; exchanges and jobs are journaled. Research follows what «owner» reads: the phone's note opens are recorded, a topic note unread for 30 days stops being researched on its own, and the monthly brief names the topics it stopped. A message sent while JARVIS is busy is stored before the ack, then
 joins the running turn of its own conversation or gets its own reply. After an uncertain Discord send, JARVIS must not claim confirmed
 delivery or blindly repeat an external write. Long work is never silent: a long Discord answer goes whole to
 shared/ with a summary in the chat, a long turn posts a progress line every couple of

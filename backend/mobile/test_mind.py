@@ -296,3 +296,20 @@ def test_letters_and_conversations_are_titled_by_kind_and_day():
     assert titles["conversations/significant/2026-09-30_8f3b162b.md"] == "Conversation, 30 Sep 2026"
     assert titles["letters/2026-10-02_8f3b162c.md"] == "A letter with its own heading"
     assert titles["creative/2026-10-03_8f3b162d.md"] == "2026 10 03 8f3b162d"
+
+
+def test_opening_a_note_records_it_including_a_304_but_not_a_404(client, monkeypatch):
+    from backend.storage import note_opens
+    calls = []
+    real = note_opens.record
+    monkeypatch.setattr(note_opens, "record", lambda folder, name, now=None: (calls.append((folder, name)), real(folder, name, now))[1])
+    note("topics", "duration.md", "# Duration")
+    url = "/mobile/v1/vault/note"
+    params = {"folder": "topics", "name": "duration.md"}
+    assert client.get(url, params={"folder": "topics", "name": "missing.md"}).status_code == 404
+    assert calls == [] and note_opens.last_opened("topics") == {}
+    r = client.get(url, params=params)
+    assert r.status_code == 200 and calls == [("topics", "duration.md")]
+    assert "duration.md" in note_opens.last_opened("topics")
+    r2 = client.get(url, params=params, headers={"If-None-Match": r.headers["etag"]})
+    assert r2.status_code == 304 and len(calls) == 2

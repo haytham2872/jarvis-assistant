@@ -850,6 +850,7 @@ async def get_overnight(request: Request, since: str | None = None) -> Response:
 async def get_vault_note(request: Request, folder: str = "", name: str = "") -> Response:
     _authorize(request)
     from backend.mobile import notes
+    from backend.storage import note_opens
     try:
         data = await asyncio.get_running_loop().run_in_executor(None, notes.read, folder, name)
     except notes.InvalidNote as exc:
@@ -859,6 +860,7 @@ async def get_vault_note(request: Request, folder: str = "", name: str = "") -> 
     except Exception as exc:
         log.warning("mobile notes: read failed (%s)", exc)
         raise HTTPException(503, "That note could not be read just now.") from exc
+    await asyncio.get_running_loop().run_in_executor(None, note_opens.record, folder, name)
     return _conditional(request, data)
 
 

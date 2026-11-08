@@ -1352,7 +1352,8 @@ async def compose_brief(now: Optional[datetime.datetime] = None,
     portfolio_line = portfolio.brief_line()
     skills_line = _collect_skills_overnight(now)
     goals_line = _collect_goals_line()
-    tail = "\n".join(l for l in (portfolio_line, skills_line, goals_line) if l)
+    reading_line = _collect_reading_line(now)
+    tail = "\n".join(l for l in (portfolio_line, skills_line, goals_line, reading_line) if l)
 
     if not any([nights_text, research_trail, intents, reminders, calendar, plan_today, expensive, tail]):
         return f"Morning. Quiet night — nothing new overnight, nothing on the schedule for today. ({now.strftime('%A %H:%M')})"
@@ -1389,6 +1390,39 @@ async def compose_brief(now: Optional[datetime.datetime] = None,
     if expensive:       parts.append("Expensive turns:\n" + expensive)
     if tail:            parts.append(tail)
     return "\n\n".join(parts)
+
+
+def _collect_reading_line(now: datetime.datetime) -> str:
+    """Once a month: one code-written line naming the research topics that stopped
+    because the owner has not opened them. "" when none, already told this month, or the
+    research state can't be read (the brief never fails because of this)."""
+    try:
+        from backend.brain import research
+        topics = research._load_state().get("stopped_topics") or []
+        if not topics:
+            return ""
+        stop_days = getattr(research, "_UNREAD_STOP_DAYS", 30)
+        told = _load_state().get("reading_report_date", "")
+        if told[:7] == now.strftime("%Y-%m"):
+            return ""
+
+        def day(epoch):
+            d = datetime.datetime.fromtimestamp(epoch, _TZ)
+            return f"{d.day} {d.strftime('%b')}"
+
+        new = [t for t in topics if not told or
+               (datetime.datetime.fromtimestamp(t["since"], _TZ)
+                + datetime.timedelta(days=stop_days)).strftime("%Y-%m-%d") > told]
+        if not new:
+            return ""
+        names = [f"{t['title']} (you haven't opened it since {day(t['last_opened'])})"
+                 if t.get("last_opened") else f"{t['title']} (not opened since {day(t['since'])})"
+                 for t in new[:5]]
+        more = f"; and {len(new) - 5} more" if len(new) > 5 else ""
+        return ("Research I stopped: " + "; ".join(names) + more
+                + ". Open the note or ask me and it comes back.")
+    except Exception:
+        return ""
 
 
 def _collect_goals_line() -> str:
@@ -1453,7 +1487,8 @@ def _collect_expensive_turns() -> str:
 
 
 def _mark_briefed(now: datetime.datetime,
-                  reported_results: Optional[list[dict]] = None) -> None:
+                  reported_results: Optional[list[dict]] = None,
+                  reading_reported: bool = False) -> None:
     """Record delivery and consume only the night results included in that brief.
 
     A06: these two facts belong together. Marking without consuming would repeat the
@@ -1469,6 +1504,8 @@ def _mark_briefed(now: datetime.datetime,
 
     def _apply(state):
         state["last_brief_date"] = now.strftime("%Y-%m-%d")
+        if reading_reported:
+            state["reading_report_date"] = now.strftime("%Y-%m-%d")
         if covered is None:
             state["night_results"] = []
             return
@@ -1494,7 +1531,8 @@ async def _send_brief(now: datetime.datetime) -> bool:
         except Exception as e:
             log.debug("chronos: brief DM failed: %s", e)
     if sent:
-        _mark_briefed(now, covered)
+        reading = _collect_reading_line(now)
+        _mark_briefed(now, covered, reading_reported=bool(reading) and reading in text)
         log.info("chronos: morning brief sent")
         await _offer_skill_routines()
     else:

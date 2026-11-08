@@ -172,6 +172,39 @@ it('the answer to a voice message is read aloud once, from the final answer only
   expect(onSpokenAnswer).toHaveBeenCalledTimes(1);                 // once, not again per snapshot
 });
 
+async function spokenTurn(options: Parameters<typeof useChat>[1]) {
+  api.sendVoice.mockImplementation(async (_c, id) => ({ transcript: 'hi', status: heard(id, 'hi'), stt: null }));
+  const hook = await renderHook(() => useChat(cfg, options));
+  await waitFor(() => expect(hook.result.current.state.loaded).toBe(true));
+  await act(async () => { await hook.result.current.sendRecording(URI, 2_000, true); });
+  await act(async () => { await hook.result.current.sendRecording(URI, 2_000, false); });
+  const [wanted, quiet] = hook.result.current.state.order;
+  return { hook, wanted, quiet, send: streamEvents() };
+}
+
+it('live speech: clips and the end of a spoken turn are forwarded, and its answer is not read again', async () => {
+  const onSpokenAnswer = jest.fn();
+  const onLiveSpeech = jest.fn();
+  const { wanted, quiet, send } = await spokenTurn({ onSpokenAnswer, onLiveSpeech });
+  const clip = { type: 'speech_clip', clip: 0, seq: 41, epoch: 'e', at: 0, request_id: wanted, text: 'Hello.', lang: 'en' };
+  const end = { type: 'speech_end', seq: 1, epoch: 'e', at: 0, request_id: wanted, clips: 1 };
+  await act(() => send(clip));
+  await act(() => send(end));
+  await act(() => send({ ...clip, request_id: quiet }));            // not a spoken turn: ignored
+  expect(onLiveSpeech.mock.calls).toEqual([[`req:${wanted}`, clip], [`req:${wanted}`, end]]);
+  await act(() => send({ type: 'run_finished', seq: 2, epoch: 'e', at: 0, request_id: wanted, outcome: 'answered', answer: 'Hello.' }));
+  expect(onSpokenAnswer).not.toHaveBeenCalled();                    // the clips already said it
+});
+
+it('no speech_clip for a spoken turn: the answer is read by the plan path exactly as before', async () => {
+  const onSpokenAnswer = jest.fn();
+  const onLiveSpeech = jest.fn();
+  const { wanted, send } = await spokenTurn({ onSpokenAnswer, onLiveSpeech });
+  await act(() => send({ type: 'run_finished', seq: 1, epoch: 'e', at: 0, request_id: wanted, outcome: 'answered', answer: 'Done.' }));
+  expect(onLiveSpeech).not.toHaveBeenCalled();
+  expect(onSpokenAnswer).toHaveBeenCalledWith(`req:${wanted}`, 'Done.');
+});
+
 it('a voice message sent with reading off, or a failed turn, is not read aloud', async () => {
   const onSpokenAnswer = jest.fn();
   api.sendVoice.mockImplementation(async (_c, id) => ({ transcript: 'x', status: heard(id, 'x'), stt: null }));
@@ -257,6 +290,41 @@ it('nothing to send: no words and no files', async () => {
   const h = await mounted();
   await act(async () => { await h.result.current.send('  ', undefined, { uploads: [], files: [] }); });
   expect(api.sendMessage).not.toHaveBeenCalled();
+});
+
+// ------------------------------------------------------------------ live voice
+
+it('adopts a turn the server already submitted, exactly like an uploaded voice turn', async () => {
+  const onSpokenAnswer = jest.fn();
+  const hook = await renderHook(() => useChat(cfg, { onSpokenAnswer }));
+  await waitFor(() => expect(hook.result.current.state.loaded).toBe(true));
+  await act(async () => hook.result.current.adoptVoiceTurn('req-live-1', heard('req-live-1', 'call Samir'), true, 9, 'file:///rec.wav'));
+  const [r] = Object.values(hook.result.current.state.requests);
+  expect(r).toMatchObject({ request_id: 'req-live-1', text: 'call Samir', input: 'voice', state: 'queued' });
+  expect(mockDelete).toHaveBeenCalledWith('file:///rec.wav');       // submitted: the WAV is no longer needed
+  expect(api.sendVoice).not.toHaveBeenCalled();
+  const send = streamEvents();
+  await act(() => send({ type: 'run_finished', seq: 1, epoch: 'e', at: 1, request_id: 'req-live-1', outcome: 'answered', answer: 'Done.' }));
+  expect(onSpokenAnswer).toHaveBeenCalledWith('req:req-live-1', 'Done.');
+});
+
+it('a live turn that is not to be spoken is not read aloud', async () => {
+  const onSpokenAnswer = jest.fn();
+  const hook = await renderHook(() => useChat(cfg, { onSpokenAnswer }));
+  await waitFor(() => expect(hook.result.current.state.loaded).toBe(true));
+  await act(async () => hook.result.current.adoptVoiceTurn('req-live-2', heard('req-live-2', 'hi'), false));
+  const send = streamEvents();
+  await act(() => send({ type: 'run_finished', seq: 1, epoch: 'e', at: 1, request_id: 'req-live-2', outcome: 'answered', answer: 'Hello.' }));
+  expect(onSpokenAnswer).not.toHaveBeenCalled();
+});
+
+it('the fallback upload of a live turn reuses its request id and reply_to', async () => {
+  api.sendVoice.mockImplementation(async (_c, id) => ({ transcript: 'x', status: heard(id, 'x'), stt: null }));
+  const h = await mounted();
+  let got: { requestId: string | null; line: string | null } = { requestId: null, line: null };
+  await act(async () => { got = await h.result.current.sendVoiceTurn('file:///rec.wav', 2_000, true, 5, 'req-live-3'); });
+  expect(got.requestId).toBe('req-live-3');
+  expect(api.sendVoice).toHaveBeenLastCalledWith(cfg, 'req-live-3', 'file:///rec.wav', true, 5);
 });
 
 it("his own words are kept when the server's text is a different message", async () => {

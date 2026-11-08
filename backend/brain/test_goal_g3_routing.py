@@ -152,4 +152,4 @@ def test_chat_wires_the_offer_into_the_turn():
     # the offer is used in exactly four places (computed, checked, added to the turn, passed
     # as the planning gate): nothing else -- the thinking tier above all -- depends on it
     assert src.count("goal_offer") == 4, src.count("goal_offer")
-    assert "use_thinking=use_thinking_tier,\n        allow_foreground_plan=not goal_offer," in src
+    assert "use_thinking=use_thinking_tier,\n        allow_foreground_plan=not goal_offer and" in src

@@ -2,6 +2,7 @@
 // goes to the server, which transcribes it and runs it as a message; the heard text then
 // replaces the placeholder bubble. Slice 1: a Liquid Glass capsule floating over the chat, the
 // send and mic buttons in JARVIS blue, amber while recording.
+import { File } from 'expo-file-system';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -12,9 +13,13 @@ import { meterLevel, type ServerConfig } from '../core/api';
 import { color, font, mono, space } from '../theme/tokens';
 import { Glass } from '../ui/Glass';
 import type { LevelBus } from '../voice/levels';
+import type { LiveResult } from '../voice/liveVoice';
+import { useLiveMic } from '../voice/useLiveMic';
 import { useRecorder } from '../voice/useRecorder';
 import { runCommand } from './client';
 import { CommandSheet, commandError } from './CommandSheet';
+import { newRequestId } from './reducer';
+import type { RequestStatus } from './types';
 
 type Notice = { text: string; settings?: boolean };
 
@@ -26,7 +31,11 @@ type Props = {
   /** Recording started: warm the transcriber. */
   onRecordStart: () => void;
   /** Recording done: a line for the owner back (nothing heard), or null. */
-  onRecording: (uri: string, ms: number) => Promise<string | null>;
+  onRecording: (uri: string, ms: number, requestId?: string) => Promise<string | null>;
+  /** The voice note streams live when this is given (and the phone can): `onTurn` gets the turn the
+   * server already submitted, with the WAV kept alongside. Without it, or when the stream is
+   * unavailable, the recording is uploaded as before. */
+  live?: { spoken: boolean; replyTo?: number; onTurn: (requestId: string, status: RequestStatus, audioUri?: string) => void };
   /** The orb's input: the real microphone level while recording. */
   levels?: LevelBus;
   /** Recording started or stopped (the orb's listening state). */
@@ -58,16 +67,22 @@ export function elapsed(ms: number): string {
 export function Composer(p: Props) {
   const stopRef = useRef<() => void>(() => undefined);
   const rec = useRecorder(useCallback(() => stopRef.current(), []));   // the 2-minute cap sends it
+  const lm = useLiveMic(p.cfg, useCallback(() => stopRef.current(), []));
+  const liveId = useRef<string | null>(null);        // the live session in progress
+  const liveBroken = useRef(false);                  // the stream failed to start once: use the recorder
+  const active = rec.active || lm.active;
+  const recMs = lm.active ? lm.ms : rec.ms;
+  const recLevel = lm.active ? lm.metering : rec.metering;
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const { levels, onActiveChange } = p;
   useEffect(() => {
-    levels?.push(rec.active ? meterLevel(rec.metering) : 0);
-  }, [levels, rec.active, rec.metering]);
+    levels?.push(active ? meterLevel(recLevel) : 0);
+  }, [levels, active, recLevel]);
   useEffect(() => {
-    onActiveChange?.(rec.active);
-  }, [onActiveChange, rec.active]);
+    onActiveChange?.(active);
+  }, [onActiveChange, active]);
 
   useEffect(() => {
     if (!notice) return;
@@ -80,23 +95,64 @@ export function Composer(p: Props) {
     setBusy(true);
     setNotice(null);
     p.onRecordStart();
+    if (p.live && p.cfg && !liveBroken.current) {
+      const id = newRequestId();
+      const started = await lm.start({ requestId: id, mode: 'note', spoken: p.live.spoken, replyTo: p.live.replyTo });
+      if (started.ok) {
+        liveId.current = id;
+        setBusy(false);
+        void started.result.then((res) => onLive(id, res));
+        return;
+      }
+      if (started.why === 'permission') {
+        setBusy(false);
+        setNotice({ text: 'The microphone is off for Expo Go.', settings: true });
+        return;
+      }
+      liveBroken.current = true;
+    }
     const err = await rec.start();
     setBusy(false);
     if (err === 'permission') setNotice({ text: 'The microphone is off for Expo Go.', settings: true });
     else if (err === 'failed') setNotice({ text: 'The microphone could not start. Try again.' });
   };
 
+  // The server's answer to a live note: a turn it submitted, nothing heard, or a failure (upload the WAV).
+  const onLive = async (id: string, res: LiveResult) => {
+    if (liveId.current !== id || res.kind === 'cancelled') return;
+    liveId.current = null;
+    setBusy(true);
+    const file = await lm.finish();
+    if (res.kind === 'turn') {
+      p.live?.onTurn(id, res.status, file?.uri);
+    } else if (res.kind === 'failed') {
+      if (!file) setNotice({ text: 'That recording could not be saved. Try again.' });
+      else {
+        const line = await p.onRecording(file.uri, file.ms, id);       // same request id: never run twice
+        if (line) setNotice({ text: line });
+      }
+    } else {
+      if (file) try { new File(file.uri).delete(); } catch { /* already gone */ }
+      setNotice({ text: 'I heard nothing in that recording.' });
+    }
+    setBusy(false);
+  };
+
   const { autoStart, onAutoStarted } = p;
   useEffect(() => {
     if (!autoStart) return;
     onAutoStarted?.();
-    if (!rec.active) void begin();
+    if (!active) void begin();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart]);
 
   const stop = async () => {
     if (busy) return;
     setBusy(true);
+    if (liveId.current) {                // the server answers with the turn (onLive clears busy)
+      await lm.end();
+      return;
+    }
     const r = await rec.finish();
     setBusy(false);
     if (!r) {
@@ -111,7 +167,12 @@ export function Composer(p: Props) {
   const cancel = async () => {
     if (busy) return;
     setBusy(true);
-    await rec.cancel();
+    if (liveId.current) {
+      liveId.current = null;
+      await lm.cancel();
+    } else {
+      await rec.cancel();
+    }
     setBusy(false);
   };
 
@@ -160,19 +221,23 @@ export function Composer(p: Props) {
         </View>
       ) : null}
 
-      {!rec.active && p.attachments?.length ? (
+      {!active && p.attachments?.length ? (
         <AttachTray items={p.attachments} onRemove={(id) => p.onRemoveAttachment?.(id)}
           onRetry={(id) => p.onRetryAttachment?.(id)} />
       ) : null}
 
-      {rec.active ? (
+      {lm.active && lm.heard ? (
+        <Text style={styles.heard} numberOfLines={2} testID="live-heard">{lm.heard}</Text>
+      ) : null}
+
+      {active ? (
         <View style={styles.row}>
           <RoundBtn symbol="xmark" label="Cancel recording" onPress={() => void cancel()} tone="plain" />
           <Glass tone="amber" style={styles.capsule} testID="recording-bar">
-            <View style={styles.recInner} accessibilityLabel={`Recording, ${elapsed(rec.ms)}`}>
+            <View style={styles.recInner} accessibilityLabel={`Recording, ${elapsed(recMs)}`}>
               <View style={styles.recDot} />
-              <Text style={styles.recTime}>{elapsed(rec.ms)}</Text>
-              <Meter level={meterLevel(rec.metering)} />
+              <Text style={styles.recTime}>{elapsed(recMs)}</Text>
+              <Meter level={meterLevel(recLevel)} />
             </View>
           </Glass>
           <RoundBtn symbol="arrow.up" label="Send recording" onPress={() => void stop()} tone="accent" />
@@ -262,6 +327,7 @@ const styles = StyleSheet.create({
   recTime: { color: color.tHi, fontSize: font.body, fontFamily: mono, fontVariant: ['tabular-nums'] },
   meter: { flex: 1, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
   meterFill: { height: 6, borderRadius: 3, backgroundColor: color.stListening },
+  heard: { color: color.tMid, fontSize: font.label, fontStyle: 'italic', paddingHorizontal: space.s2 },
   notice: { flexDirection: 'row', alignItems: 'center', gap: space.s3, paddingHorizontal: space.s2 },
   noticeText: { flex: 1, color: color.warn, fontSize: font.label },
   noticeAction: { color: color.stIdle, fontSize: font.label, fontWeight: '600' },

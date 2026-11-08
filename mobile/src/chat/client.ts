@@ -1,7 +1,7 @@
 // HTTP calls for the conversation (backend/mobile/routes.py).
 import { File, UploadType } from 'expo-file-system';
 
-import { authHeaders, endpoint, ExplainedError, type ServerConfig } from '../core/api';
+import { authHeaders, endpoint, ExplainedError, wsUrl, type ServerConfig } from '../core/api';
 import type { SpeechPlan } from '../voice/speechQueue';
 import type {
   ActivityView, Approval, ChatSummary, Exchange, InboxView, NoticeRoute, NoticeSettings, Outcome, PortfolioView,
@@ -122,9 +122,10 @@ export async function sendVoice(cfg: ServerConfig, request_id: string, uri: stri
   replyTo?: number): Promise<VoiceResult> {
   const path = `/recordings?request_id=${encodeURIComponent(request_id)}${spoken ? '&spoken=1' : ''}`
     + (replyTo ? `&reply_to=${replyTo}` : '');
+  const mime = /\.wav$/i.test(uri) ? 'audio/wav' : 'audio/mp4';      // the live mic leaves a WAV
   const res = await new File(uri).upload(endpoint(cfg.baseUrl, path), {
-    headers: { ...authHeaders(cfg.token), 'Content-Type': 'audio/mp4' },
-    mimeType: 'audio/mp4',
+    headers: { ...authHeaders(cfg.token), 'Content-Type': mime },
+    mimeType: mime,
     uploadType: UploadType.BINARY_CONTENT,
     sessionType: 'foreground',
   });
@@ -138,6 +139,14 @@ export async function sendVoice(cfg: ServerConfig, request_id: string, uri: stri
     throw new HttpError(res.status, typeof body.detail === 'string' ? body.detail : `HTTP ${res.status}`);
   }
   return body as unknown as VoiceResult;
+}
+
+/** WS /voice/live: the microphone streamed while the owner talks (voice/liveVoice.ts). */
+export function liveUrl(cfg: ServerConfig, o: { requestId: string; mode: 'conversation' | 'note'; spoken: boolean;
+  replyTo?: number }): string {
+  return wsUrl(endpoint(cfg.baseUrl, '/voice/live'))
+    + `?request_id=${encodeURIComponent(o.requestId)}&mode=${o.mode}&spoken=${o.spoken ? 1 : 0}`
+    + (o.replyTo ? `&reply_to=${o.replyTo}` : '');
 }
 
 /** The Stop button: stops the answer JARVIS is writing now. */
@@ -158,9 +167,19 @@ export const getSpeechPlan = (cfg: ServerConfig, source: string) =>
 
 /** GET /speech/clip: one clip as MP3 bytes. HttpError 503 (monthly allowance used) or 502
  * (the voice failed) means the iPhone's own voice should read it. */
-export async function fetchClipBytes(cfg: ServerConfig, source: string, revision: string, seq: number): Promise<Uint8Array> {
+export function fetchClipBytes(cfg: ServerConfig, source: string, revision: string, seq: number): Promise<Uint8Array> {
   const q = `source=${encodeURIComponent(source)}&revision=${encodeURIComponent(revision)}&seq=${seq}`;
-  const res = await fetch(endpoint(cfg.baseUrl, `/speech/clip?${q}`), { headers: authHeaders(cfg.token) });
+  return audioBytes(cfg, `/speech/clip?${q}`);
+}
+
+/** GET /speech/live: clip `seq` of a turn still being written, as MP3 bytes. HttpError 503 or 502
+ * means the iPhone's voice should read it; 404 means skip it. */
+export function fetchLiveClip(cfg: ServerConfig, requestId: string, seq: number): Promise<Uint8Array> {
+  return audioBytes(cfg, `/speech/live?request_id=${encodeURIComponent(requestId)}&seq=${seq}`);
+}
+
+async function audioBytes(cfg: ServerConfig, path: string): Promise<Uint8Array> {
+  const res = await fetch(endpoint(cfg.baseUrl, path), { headers: authHeaders(cfg.token) });
   if (!res.ok) {
     let detail = '';
     try {

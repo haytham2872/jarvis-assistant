@@ -16,6 +16,11 @@ const mockRecorder = {
   start: jest.fn(), finish: jest.fn(), cancel: jest.fn(), active: false, ms: 0, metering: -30 as number | undefined,
 };
 jest.mock('../voice/useRecorder', () => ({ useRecorder: () => mockRecorder }));
+const mockLive = {
+  start: jest.fn(), end: jest.fn(), cancel: jest.fn(), finish: jest.fn(), active: false, heard: '', ms: 0,
+  metering: undefined as number | undefined,
+};
+jest.mock('../voice/useLiveMic', () => ({ useLiveMic: () => mockLive }));
 
 async function setup(draft = '') {
   const props = {
@@ -30,6 +35,12 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockRecorder.active = false;
   mockRecorder.ms = 0;
+  mockLive.active = false;
+  mockLive.heard = '';
+  mockLive.start.mockResolvedValue({ ok: false, why: 'unavailable' });
+  mockLive.end.mockResolvedValue(undefined);
+  mockLive.cancel.mockResolvedValue(undefined);
+  mockLive.finish.mockResolvedValue({ uri: 'file:///live.wav', ms: 4_000 });
 });
 
 it('offers the mic when there is nothing typed, and Send when there is', async () => {
@@ -259,4 +270,85 @@ describe('commands', () => {
     expect(screen.getByText(/Can't reach JARVIS/)).toBeTruthy();
     expect(props.onCommandReply).not.toHaveBeenCalled();
   });
+});
+
+// ------------------------------------------------------------------ live voice note
+
+const cfg = { baseUrl: 'https://j.example', token: 't' };
+let liveParams: Record<string, unknown> = {};
+let settleLive: (r: Record<string, unknown>) => void = () => undefined;
+function liveAvailable() {
+  mockLive.start.mockImplementation(async (params: Record<string, unknown>) => {
+    liveParams = params;
+    mockLive.active = true;
+    return { ok: true, result: new Promise((resolve) => { settleLive = resolve; }) };
+  });
+  mockLive.end.mockImplementation(async () => { mockLive.active = false; });
+}
+async function setupLive() {
+  const props = {
+    enabled: true, draft: '', setDraft: jest.fn(), onSendText: jest.fn(), cfg,
+    onRecordStart: jest.fn(), onRecording: jest.fn().mockResolvedValue(null),
+    live: { spoken: true, replyTo: 7, onTurn: jest.fn() },
+  };
+  const view = await render(<Composer {...props} />);
+  await act(async () => { await fireEvent.press(screen.getByLabelText('Record a voice message')); });
+  await view.rerender(<Composer {...props} />);          // the hook's `active` flips once the session is open
+  return { props, view };
+}
+const settle = async (r: Record<string, unknown>) => { await act(async () => { settleLive(r); }); };
+
+it('a voice note opens a live session in note mode with the reply and spoken options', async () => {
+  liveAvailable();
+  await setupLive();
+  expect(liveParams).toMatchObject({ mode: 'note', spoken: true, replyTo: 7 });
+  expect(typeof liveParams.requestId).toBe('string');
+  expect(mockRecorder.start).not.toHaveBeenCalled();
+});
+
+it('shows the heard text while recording live; stop tells the server to end, and the turn is registered', async () => {
+  liveAvailable();
+  const { props, view } = await setupLive();
+  mockLive.heard = 'call Samir';
+  await view.rerender(<Composer {...props} />);
+  expect(screen.getByText('call Samir')).toBeTruthy();
+  await act(async () => { await fireEvent.press(screen.getByLabelText('Send recording')); });
+  expect(mockLive.end).toHaveBeenCalled();
+  const status = { request_id: liveParams.requestId, state: 'queued' };
+  await settle({ kind: 'turn', requestId: liveParams.requestId, text: 'call Samir', status });
+  expect(props.live.onTurn).toHaveBeenCalledWith(liveParams.requestId, status, 'file:///live.wav');
+  expect(props.onRecording).not.toHaveBeenCalled();
+});
+
+it('a failed live session uploads the WAV under the same request id', async () => {
+  liveAvailable();
+  const { props } = await setupLive();
+  await act(async () => { await fireEvent.press(screen.getByLabelText('Send recording')); });
+  await settle({ kind: 'failed', reason: 'closed' });
+  expect(props.onRecording).toHaveBeenCalledWith('file:///live.wav', 4_000, liveParams.requestId);
+  expect(props.live.onTurn).not.toHaveBeenCalled();
+});
+
+it('nothing heard live says so and registers nothing', async () => {
+  liveAvailable();
+  const { props } = await setupLive();
+  await act(async () => { await fireEvent.press(screen.getByLabelText('Send recording')); });
+  await settle({ kind: 'empty' });
+  expect(screen.getByText(/heard nothing/)).toBeTruthy();
+  expect(props.live.onTurn).not.toHaveBeenCalled();
+  expect(props.onRecording).not.toHaveBeenCalled();
+});
+
+it('cancel drops the live session', async () => {
+  liveAvailable();
+  await setupLive();
+  await act(async () => { await fireEvent.press(screen.getByLabelText('Cancel recording')); });
+  expect(mockLive.cancel).toHaveBeenCalled();
+});
+
+it('when the live stream is unavailable the recorder is used, as before', async () => {
+  mockRecorder.start.mockResolvedValue(null);
+  await setupLive();
+  expect(mockLive.start).toHaveBeenCalled();
+  expect(mockRecorder.start).toHaveBeenCalled();
 });

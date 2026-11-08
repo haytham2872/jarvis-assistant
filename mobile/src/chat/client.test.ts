@@ -1,7 +1,7 @@
 // The wire format of the voice calls: what the server sees, and how its errors come back.
 import {
-  answerGoal, controlGoal, decideGoalProposal, fetchClipBytes, getActivity, getGoalFile, getPortfolio, getSpeechPlan, getToday,
-  HttpError, pauseWork, raiseGoalBudget, resumeWork, sendVoice, tapBlock, transcribeGoalAnswer,
+  answerGoal, controlGoal, decideGoalProposal, fetchClipBytes, fetchLiveClip, getActivity, getGoalFile, getPortfolio, getSpeechPlan, getToday,
+  HttpError, liveUrl, pauseWork, raiseGoalBudget, resumeWork, sendVoice, tapBlock, transcribeGoalAnswer,
   addWeekBlock, applyWeek, getWeek, moveWeekBlock, undoWeek,
   getRecord, getOvernight, getVaultNote, getHub, getCommands, runCommand,
 } from './client';
@@ -128,6 +128,21 @@ it('a voice message asks for its answer to be read aloud only when it will be', 
   expect(mockUpload.mock.calls[0][2].headers.Authorization).toBe('Bearer tok');
 });
 
+it('uploads the live microphone WAV as audio/wav, and an m4a as audio/mp4', async () => {
+  mockUpload.mockResolvedValue({ status: 202, body: JSON.stringify({ transcript: 'hi', status: {}, stt: null }) });
+  await sendVoice(cfg, 'req-1', 'file:///a.wav', true);
+  await sendVoice(cfg, 'req-2', 'file:///b.m4a');
+  expect(mockUpload.mock.calls[0][2].headers['Content-Type']).toBe('audio/wav');
+  expect(mockUpload.mock.calls[1][2].headers['Content-Type']).toBe('audio/mp4');
+});
+
+it('builds the live voice url with its mode, spoken flag and optional reply_to', () => {
+  expect(liveUrl(cfg, { requestId: 'req-1', mode: 'conversation', spoken: true }))
+    .toBe('wss://jarvis.example/mobile/v1/voice/live?request_id=req-1&mode=conversation&spoken=1');
+  expect(liveUrl(cfg, { requestId: 'req-2', mode: 'note', spoken: false, replyTo: 7 }))
+    .toBe('wss://jarvis.example/mobile/v1/voice/live?request_id=req-2&mode=note&spoken=0&reply_to=7');
+});
+
 it('asks for a plan and a clip by source, and reports the status of a refused clip', async () => {
   const fetchMock = jest.fn()
     .mockResolvedValueOnce(json(200, { source: 'req:a b', revision: 'r', summarised: false, clips: [] }))
@@ -141,6 +156,16 @@ it('asks for a plan and a clip by source, and reports the status of a refused cl
   const err = await fetchClipBytes(cfg, 'ex:x', 'r', 3).catch((e) => e);
   expect(err).toBeInstanceOf(HttpError);
   expect(err.status).toBe(503);
+});
+
+it('asks for a live clip by request id and seq, and reports the status of a refused one', async () => {
+  const fetchMock = jest.fn()
+    .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => 'audio/mpeg' }, arrayBuffer: async () => new Uint8Array([3]).buffer })
+    .mockResolvedValueOnce(json(404, { detail: 'no such clip' }));
+  global.fetch = fetchMock as unknown as typeof fetch;
+  expect(Array.from(await fetchLiveClip(cfg, 'r 1', 4))).toEqual([3]);
+  expect(fetchMock.mock.calls[0][0]).toBe('https://jarvis.example/mobile/v1/speech/live?request_id=r%201&seq=4');
+  expect(((await fetchLiveClip(cfg, 'r1', 5).catch((e) => e)) as HttpError).status).toBe(404);
 });
 
 it('reads the activity view and pauses or resumes the same way /pause and /resume do', async () => {

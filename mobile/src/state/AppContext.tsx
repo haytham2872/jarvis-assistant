@@ -56,7 +56,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [reload]);
 
   const speaker = useSpeaker(cfg, prefs.rate, levels);
-  const chat = useChat(cfg, { onSpokenAnswer: speaker.speak });
+  const chat = useChat(cfg, { onSpokenAnswer: speaker.speak, onLiveSpeech: speaker.live });
   const notices = useNotices(cfg, chat.state.lastNotice);
   const waitingCount = useMemo(
     () => waitingApprovals(chat.state).filter((a) => a.state === 'pending').length, [chat.state]);

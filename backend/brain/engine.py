@@ -738,6 +738,28 @@ def _sentence_around(text: str, m: "re.Match") -> str:
     return text[start:end.start() if end else len(text)]
 
 
+# "I've set the reminder for 9": the patterns above want a noun before the verb, a spoken
+# sentence is held on the bare first-person verb as well.
+_DONE_CLAIM = re.compile(
+    r"\bI(?:'ve| have)?\s+(?:just\s+|now\s+|already\s+)?(?:set|scheduled|saved|recorded|logged|"
+    r"stored|added|sent|emailed|created|booked|queued|closed|noted|updated|deleted|removed|"
+    r"cancel+ed|moved|marked)\b", re.I)
+
+
+def speakable(sentence: str) -> bool:
+    """May this sentence be spoken as it is written, before the reply check has run? False
+    when any claim pattern (_CLAIM_PATTERNS, a bare "I sent it" about an email, a decline,
+    a ledger denial) matches anywhere in it: that sentence waits for the checked answer.
+    Conservative on purpose -- none of the checks' exemptions apply, a held sentence is
+    only spoken a little later."""
+    text = sentence or ""
+    if _DONE_CLAIM.search(text) or any(p.search(text) for p in _CLAIM_PATTERNS.values()):
+        return False
+    if _EMAIL_WORD.search(text) and _WEAK_SENT.search(text):
+        return False
+    return not (_DECLINE_CLAIM.search(text) or _LEDGER_DENIAL.search(text))
+
+
 # Tools that only REPORT what already exists. After one of them succeeds, a reply that describes
 # the schedule ("the night task is queued", "the NVDA watch is live") is describing what it just
 # read, not claiming to have set anything up. Live (2026-09-30, P2): the activity view says
@@ -818,7 +840,8 @@ _VOICE_NOTE = (
 # tables, are tiring to listen to (the full text stays on his screen either way).
 _SPOKEN_NOTE = (
     _owner.say("[Your reply will be read aloud on «his» phone. Answer the way you would say it: briefly, "
-    "in plain sentences, the answer first. Leave out lists, tables, links and code unless «he» "
+    "in plain sentences, the answer first. Put the answer in your first sentence and keep that "
+    "sentence short, so «he» hears it at once. Leave out lists, tables, links and code unless «he» "
     "asked for them; they stay readable on «his» screen.]")
 )
 
@@ -3085,7 +3108,7 @@ async def chat(
     full_response = await _chat_compat(
         model, system, messages, send, sentence_queue, user_text=user_text,
         tools=tools, channel=channel, use_thinking=use_thinking_tier,
-        allow_foreground_plan=not goal_offer,
+        allow_foreground_plan=not goal_offer and not (channel == "mobile" and _turn_input.spoken.get()),
     )
 
     # Claim check: a reply that says something was saved, set or scheduled must be

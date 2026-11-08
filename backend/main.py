@@ -37,7 +37,9 @@ from backend.brain.embeddings import warm_embedder
 from backend.brain.intent import warm_intent
 from backend.brain import semindex
 from backend.brain import bootstrap
+from backend.brain import turn_input as _turn_input
 from backend.mobile import conversation as mobile_conversation
+from backend.mobile import live_speech
 from backend.mobile import routes as mobile_routes
 from backend.brain import background
 from backend.brain import threads as _threads
@@ -509,6 +511,10 @@ async def _execute_turn_once(text: str, channel: str = "local", want_tts: bool =
         _request_id = mobile_conversation.request_id_of(_message_key)
         _send = mobile_conversation.sink(broadcast, _run_id, _request_id)
         mobile_conversation.started(_run_id, _request_id)
+    # A heard phone turn speaks while it is written (mobile/live_speech.py).
+    _live = None
+    if _request_id and _turn_input.spoken.get():
+        _live = live_speech.start(_request_id, text)
     _answer = None
     chat_task = asyncio.create_task(run_chat())
     _current_chat_task, _stop_requested = chat_task, False
@@ -516,7 +522,9 @@ async def _execute_turn_once(text: str, channel: str = "local", want_tts: bool =
     _run_error = None
     try:
         tts = get_tts() if want_tts else None
-        if tts is None:
+        if _live is not None:
+            await _live.run(sentence_queue)
+        elif tts is None:
             await _drain_sentence_queue(sentence_queue)
         else:
             await tts.speak_from_queue(
@@ -567,6 +575,9 @@ async def _execute_turn_once(text: str, channel: str = "local", want_tts: bool =
         if channel == mobile_conversation.CHANNEL:
             from backend.brain import skills as _skills_line
             footer = _skills_line.pop_footer(channel) if _answer else ""
+            if _live is not None:
+                # Every speech_clip and speech_end go out before run_finished.
+                _live.finish(_answer, _run_state == _runs.COMPLETED)
             mobile_conversation.finished(_run_id, _request_id, _run_state == _runs.COMPLETED,
                                          (_answer + footer) if _answer else None, _run_error)
         _log_expensive_turn(_run_id, text)

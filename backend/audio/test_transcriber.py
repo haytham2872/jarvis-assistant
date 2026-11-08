@@ -119,18 +119,42 @@ def test_parakeet_runs_without_the_onnxruntime_arena(monkeypatch):
 
     class FakeOnnxAsr:
         @staticmethod
-        def load_model(name, quantization=None, sess_options=None):
-            seen.update(name=name, q=quantization, so=sess_options)
+        def load_model(name, quantization=None, sess_options=None, preprocessor_config=None):
+            seen.update(name=name, q=quantization, so=sess_options, pre=preprocessor_config)
             return Model()
 
         @staticmethod
         def load_vad(name, sess_options=None):
+            seen["vad_so"] = sess_options
             return object()
     monkeypatch.setitem(sys.modules, "onnx_asr", FakeOnnxAsr)
     run = T._load_parakeet()
     assert run(SECOND) == "bonjour"                        # blank VAD segments dropped
     assert seen["name"] == "nemo-parakeet-tdt-0.6b-v3" and seen["q"] == "int8"
     assert seen["so"].enable_cpu_mem_arena is False and seen["so"].enable_mem_pattern is False
+
+
+def test_no_onnx_pool_spins(monkeypatch):
+    """7 November: spinning pools (model, its VAD, the mel preprocessor) fought on 2 cores;
+    a 2.3 s piece took 2.4 s instead of 0.7 s. Every session sleeps when idle."""
+    seen = {}
+
+    class FakeOnnxAsr:
+        @staticmethod
+        def load_model(name, quantization=None, sess_options=None, preprocessor_config=None):
+            seen.update(so=sess_options, pre=preprocessor_config)
+            return type("M", (), {"with_vad": lambda self, v: self})()
+
+        @staticmethod
+        def load_vad(name, sess_options=None):
+            seen["vad_so"] = sess_options
+            return object()
+    monkeypatch.setitem(sys.modules, "onnx_asr", FakeOnnxAsr)
+    T._load_parakeet()
+    for so in (seen["so"], seen["vad_so"], seen["pre"]["sess_options"]):
+        for key in ("session.intra_op.allow_spinning", "session.inter_op.allow_spinning"):
+            assert so.get_session_config_entry(key) == "0"
+    assert seen["pre"]["max_concurrent_workers"] == 1
 
 
 def test_threads_follow_the_machine_or_stt_threads(monkeypatch):

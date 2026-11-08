@@ -31,8 +31,9 @@ packages (CPU-only PyTorch, so no multi-gigabyte GPU build), downloads the local
 (embedder, reranker, BM25, spaCy: about 400 MB), writes a SearXNG configuration with its own
 secret and starts the two containers. It takes 5 to 15 minutes and is safe to re-run.
 
-Add `--voice` to also download the voice-note model (Parakeet, 640 MB). Without it, voice notes
-fall back to Whisper.
+Add `--voice` to also download the voice-note model (Parakeet, 640 MB) and the 8 MB Smart Turn model that hears whether a sentence is
+finished in the phone's conversation mode (without it the turn ends after 1.2 s of silence).
+Without Parakeet, voice notes fall back to Whisper.
 
 ## 2. Create the Discord bot
 

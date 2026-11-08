@@ -4,6 +4,7 @@
 // is an ordinary voice message in the phone chat, sent as one he will hear (so JARVIS answers
 // briefly). The screen stays awake while it is open; leaving the app ends it, since Expo Go
 // cannot record or play in the background.
+import { File } from 'expo-file-system';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
@@ -16,8 +17,11 @@ import { Backdrop } from '../ui/Backdrop';
 import { Glass } from '../ui/Glass';
 import { afterSend, Vad } from '../voice/conversation';
 import type { OrbMode } from '../voice/levels';
+import { useLiveMic } from '../voice/useLiveMic';
+import type { LiveResult } from '../voice/liveVoice';
 import { useRecorder } from '../voice/useRecorder';
 import { NeuralOrb } from '../orb/NeuralOrb';
+import { newRequestId } from './reducer';
 
 type Phase = 'starting' | 'listening' | 'sending' | 'waiting' | 'ended';
 const MAX_MISSES = 2;           // recordings in a row the server heard nothing in, before stopping
@@ -26,12 +30,15 @@ const TICK_MS = 400;
 export function ConversationMode({ onClose }: { onClose: () => void }) {
   useKeepAwake();
   const insets = useSafeAreaInsets();
-  const { chat, speaker, levels, setRecording } = useApp();
+  const { cfg, chat, speaker, levels, setRecording } = useApp();
   const win = useWindowDimensions();
   // Slice 6: the orb fills the screen's width, leaving room for the words under it.
   const orbSize = Math.round(Math.max(160, Math.min(win.width - space.s5 * 2, win.height * 0.44)));
   const stopRef = useRef<() => void>(() => undefined);
   const rec = useRecorder(useCallback(() => stopRef.current(), []));   // the 2-minute cap ends a turn
+  const live = useLiveMic(cfg, useCallback(() => stopRef.current(), []));
+  const liveUnavailable = useRef(false);     // the stream failed to start once: use the recorder from then on
+  const liveId = useRef<string | null>(null);   // the request id of the live session in progress, else null
   const [phase, setPhase] = useState<Phase>('starting');
   const [note, setNote] = useState('');
   const [turnId, setTurnId] = useState<string | null>(null);
@@ -43,6 +50,8 @@ export function ConversationMode({ onClose }: { onClose: () => void }) {
   const alive = useRef(true);
   const recRef = useRef(rec);
   recRef.current = rec;
+  const liveRef = useRef(live);
+  liveRef.current = live;
   const lastFeed = useRef(0);
 
   const end = useCallback(async (why = '') => {
@@ -51,6 +60,10 @@ export function ConversationMode({ onClose }: { onClose: () => void }) {
     setPhase('ended');
     setNote(why);
     speaker.stop();
+    if (liveId.current) {
+      liveId.current = null;
+      await liveRef.current.cancel();
+    }
     if (recRef.current.active) await recRef.current.cancel();
     setRecording(false);
     levels.push(0);
@@ -64,30 +77,87 @@ export function ConversationMode({ onClose }: { onClose: () => void }) {
     spoke.current = false;
     answeredAt.current = null;
     chat.warmUp();
+    if (!liveUnavailable.current) {
+      const id = newRequestId();
+      const started = await live.start({ requestId: id, mode: 'conversation', spoken: true });
+      if (!alive.current) return;
+      if (started.ok) {
+        liveId.current = id;
+        setRecording(true);
+        setPhase('listening');
+        void started.result.then((res) => onLive(id, res));
+        return;
+      }
+      if (started.why === 'permission') return void end('The microphone is off for Expo Go: turn it on in the iPhone Settings.');
+      liveUnavailable.current = true;          // this turn, and the rest, use the recorder
+    }
     const err = await rec.start();
     if (err === 'permission') return void end('The microphone is off for Expo Go: turn it on in the iPhone Settings.');
     if (err) return void end('The microphone could not start.');
     setRecording(true);
     setPhase('listening');
-  }, [speaker, chat, rec, end, setRecording]);
+  }, [speaker, chat, rec, live, end, setRecording]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** A turn that did not happen (nothing heard): try again, twice at most. */
+  const miss = useCallback((line: string | null) => {
+    misses.current += 1;
+    if (misses.current >= MAX_MISSES) return void end(line ?? 'I could not hear you, so I stopped listening.');
+    return void listen();
+  }, [end, listen]);
+
+  /** The turn is in the chat: wait for its answer. */
+  const submitted = useCallback((requestId: string) => {
+    misses.current = 0;
+    setTurnId(requestId);
+    setPhase('waiting');
+  }, []);
+
+  // The server decided: a turn it submitted, nothing heard, or silence; or the socket failed and the WAV goes up.
+  const onLive = useCallback(async (id: string, res: LiveResult) => {
+    if (!alive.current || liveId.current !== id || res.kind === 'cancelled') return;
+    liveId.current = null;
+    setPhase('sending');
+    const file = await live.finish();
+    setRecording(false);
+    levels.push(0);
+    if (!alive.current) return;
+    const drop = () => {
+      if (file) try { new File(file.uri).delete(); } catch { /* already gone */ }
+    };
+    if (res.kind === 'turn') {
+      chat.adoptVoiceTurn(id, res.status, true, undefined, file?.uri);
+      return void submitted(id);
+    }
+    if (res.kind === 'no_speech') {
+      drop();
+      return void end('No one spoke for a while, so I stopped listening.');
+    }
+    if (res.kind === 'empty') {
+      drop();
+      return void miss(null);
+    }
+    // failed: the same request id, so a turn the server did run is never run twice
+    if (!file) return void end('That recording could not be saved.');
+    const { requestId, line } = await chat.sendVoiceTurn(file.uri, file.ms, true, undefined, id);
+    if (!requestId || line) return void miss(line);
+    submitted(requestId);
+  }, [live, chat, end, miss, submitted, setRecording, levels]);
 
   const send = useCallback(async () => {
     if (!alive.current) return;
     setPhase('sending');
+    if (liveId.current) {                   // live: the server answers with the turn
+      void live.end();
+      return;
+    }
     const r = await rec.finish();
     setRecording(false);
     levels.push(0);
     if (!r) return void end('That recording could not be saved.');
     const { requestId, line } = await chat.sendVoiceTurn(r.uri, r.ms, true);
-    if (!requestId || line) {                // too short, or the server heard nothing in it
-      misses.current += 1;
-      if (misses.current >= MAX_MISSES) return void end(line ?? 'I could not hear you, so I stopped listening.');
-      return void listen();
-    }
-    misses.current = 0;
-    setTurnId(requestId);
-    setPhase('waiting');
-  }, [rec, chat, end, listen, setRecording, levels]);
+    if (!requestId || line) return void miss(line);         // too short, or the server heard nothing in it
+    submitted(requestId);
+  }, [rec, live, chat, end, miss, submitted, setRecording, levels]);
   stopRef.current = () => void send();
 
   // Start listening on open; end when the app leaves the screen or this closes.
@@ -104,15 +174,20 @@ export function ConversationMode({ onClose }: { onClose: () => void }) {
 
   // Listening: each level sample may end the turn.
   useEffect(() => {
-    if (phase !== 'listening' || !rec.active) return;
+    if (phase !== 'listening') return;
     const t = Date.now();
+    if (liveId.current) {                         // live: the orb follows the level, the server ends the turn
+      if (live.active) levels.push(meterLevel(live.metering));
+      return;
+    }
+    if (!rec.active) return;
     if (t - lastFeed.current < 80) return;        // one sample per meter update, not per render
     lastFeed.current = t;
     levels.push(meterLevel(rec.metering));
     const ev = vad.current.feed(rec.metering, t);
     if (ev === 'end') void send();
     else if (ev === 'no_speech') void end('No one spoke for a while, so I stopped listening.');
-  }, [phase, rec.active, rec.metering, send, end, levels]);
+  }, [phase, rec.active, rec.metering, live.active, live.metering, send, end, levels]);
 
   // Waiting: a clock, so a spoken answer that never starts is not waited for forever.
   useEffect(() => {
@@ -146,10 +221,10 @@ export function ConversationMode({ onClose }: { onClose: () => void }) {
         : phase === 'waiting' ? 'thinking' : 'idle';
   const label = phase === 'ended' ? (note ? 'Stopped' : 'Done')
     : phase === 'starting' ? 'Starting…'
-      : phase === 'listening' ? (vad.current.speaking ? 'Listening…' : 'Go ahead')
+      : phase === 'listening' ? ((liveId.current ? !!live.heard : vad.current.speaking) ? 'Listening…' : 'Go ahead')
         : phase === 'sending' ? 'Sending…'
           : speakerPhase === 'speaking' ? 'Speaking' : 'Thinking…';
-  const heard = req?.text;
+  const heard = phase === 'listening' && liveId.current ? live.heard : req?.text;
   const answer = req?.answer;
 
   return (

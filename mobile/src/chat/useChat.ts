@@ -10,6 +10,7 @@ import { eventBatch } from './eventBatch';
 import { decideApproval, findRequest, getSnapshot, HttpError, newChat as postNewChat, sendMessage, sendVoice, stopAnswer, warm } from './client';
 import { chatReducer, initialChat, newRequestId } from './reducer';
 import { EventStream } from './stream';
+import type { HubEvent, RequestStatus } from './types';
 
 /** Shorter than this is a slip of the finger, not a message. */
 export const MIN_VOICE_MS = 500;
@@ -31,6 +32,8 @@ export function explain(e: unknown): string {
 export type ChatOptions = {
   /** A voice message whose answer was to be read aloud has its final answer. */
   onSpokenAnswer?: (source: string, answer: string) => void;
+  /** A spoken sentence of a turn still being written (speech_clip), or its end (speech_end). */
+  onLiveSpeech?: (source: string, event: HubEvent) => void;
 };
 
 export function useChat(cfg: ServerConfig | null, options: ChatOptions = {}) {
@@ -40,6 +43,10 @@ export function useChat(cfg: ServerConfig | null, options: ChatOptions = {}) {
   const measuring = useRef(new Set<string>());
   const onSpoken = useRef(options.onSpokenAnswer);
   onSpoken.current = options.onSpokenAnswer;
+  const onLive = useRef(options.onLiveSpeech);
+  onLive.current = options.onLiveSpeech;
+  // Spoken requests that had a speech_clip: the clips said the answer, so it is not read again.
+  const liveSpoken = useRef(new Set<string>());
   // Requests whose answer is to be read aloud. The phone's wish, not the server's record: a
   // snapshot rebuilds requests from the server and must not lose it.
   const wantSpoken = useRef(new Set<string>());
@@ -74,6 +81,14 @@ export function useChat(cfg: ServerConfig | null, options: ChatOptions = {}) {
       position: () => position.current,
       onEvent: (evt) => {
         const id = evt.request_id;
+        if (id && (evt.type === 'speech_clip' || evt.type === 'speech_end')) {
+          // Not state: they go to the speaker, never into the reducer.
+          if (wantSpoken.current.has(id)) {
+            if (evt.type === 'speech_clip') liveSpoken.current.add(id);
+            onLive.current?.(`req:${id}`, evt);
+          }
+          return;
+        }
         if (__DEV__ && id && evt.type === 'response' && evt.delta && !firstWord.current.has(id)) {
           firstWord.current.add(id);
           since(`message:${id}`, 'message:first-word');
@@ -148,9 +163,10 @@ export function useChat(cfg: ServerConfig | null, options: ChatOptions = {}) {
       if (!r) continue;
       if (r.state === 'answered' && r.answer) {
         wantSpoken.current.delete(id);
-        onSpoken.current?.(`req:${id}`, r.answer);
+        if (!liveSpoken.current.delete(id)) onSpoken.current?.(`req:${id}`, r.answer);
       } else if (r.state === 'failed' || r.state === 'interrupted' || r.state === 'cancelled') {
         wantSpoken.current.delete(id);
+        liveSpoken.current.delete(id);
       }
     }
   }, [state.requests, state.order]);
@@ -186,13 +202,13 @@ export function useChat(cfg: ServerConfig | null, options: ChatOptions = {}) {
 
   /** Uploads a recording as a message; `requestId` names it (null when too short to send),
    * `line` is for the owner when nothing was heard. */
-  const sendVoiceTurn = useCallback(async (uri: string, ms: number, spoken = false, replyTo?: number):
+  const sendVoiceTurn = useCallback(async (uri: string, ms: number, spoken = false, replyTo?: number, id?: string):
     Promise<{ requestId: string | null; line: string | null }> => {
     if (ms < MIN_VOICE_MS) {
       forget(uri);
       return { requestId: null, line: null };
     }
-    const request_id = newRequestId();
+    const request_id = id ?? newRequestId();     // a live turn that failed keeps its id: the server never runs it twice
     mark(`message:${request_id}`);
     if (__DEV__) measuring.current.add(request_id);
     if (replyTo) replyOf.current.set(request_id, replyTo);
@@ -203,8 +219,21 @@ export function useChat(cfg: ServerConfig | null, options: ChatOptions = {}) {
     return { requestId: request_id, line };
   }, [deliverVoice]);
 
-  const sendRecording = useCallback(async (uri: string, ms: number, spoken = false, replyTo?: number): Promise<string | null> =>
-    (await sendVoiceTurn(uri, ms, spoken, replyTo)).line, [sendVoiceTurn]);
+  const sendRecording = useCallback(async (uri: string, ms: number, spoken = false, replyTo?: number, id?: string):
+    Promise<string | null> => (await sendVoiceTurn(uri, ms, spoken, replyTo, id)).line, [sendVoiceTurn]);
+
+  /** A live voice turn the server already submitted (voice/liveVoice.ts): shown and answered like an
+   * uploaded one. `audioUri` is the WAV kept alongside, so Retry has something to send. */
+  const adoptVoiceTurn = useCallback((request_id: string, status: RequestStatus, spoken = false, replyTo?: number,
+    audioUri?: string) => {
+    mark(`message:${request_id}`);
+    if (__DEV__) measuring.current.add(request_id);
+    if (replyTo) replyOf.current.set(request_id, replyTo);
+    if (spoken) wantSpoken.current.add(request_id);
+    dispatch({ type: 'send_voice', request_id, at: Date.now(), audio: audioUri ?? '' });
+    dispatch({ type: 'sent', status });
+    if (audioUri) forget(audioUri);
+  }, []);
 
   /** Recording started: the server loads its transcriber meanwhile. */
   const warmUp = useCallback(() => {
@@ -279,5 +308,5 @@ export function useChat(cfg: ServerConfig | null, options: ChatOptions = {}) {
     dispatch({ type: 'command', request_id: newRequestId(), text, reply, at: Date.now() });
   }, []);
 
-  return { state, send, sendRecording, sendVoiceTurn, warmUp, retry, startNewChat, refresh, decide, stop, showCommand };
+  return { state, send, sendRecording, sendVoiceTurn, adoptVoiceTurn, warmUp, retry, startNewChat, refresh, decide, stop, showCommand };
 }

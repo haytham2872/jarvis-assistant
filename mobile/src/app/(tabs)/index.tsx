@@ -17,6 +17,7 @@ import { room, sendable, splitMarker, type FileChip } from '../../attach/model';
 import { pick, PermissionRefused, useAttachments, type Source } from '../../attach/useAttachments';
 import { ApprovalTray, JobCard, jobConclusion } from '../../chat/ActionCards';
 import { Composer } from '../../chat/Composer';
+import type { RequestStatus } from '../../chat/types';
 import { ConversationMode } from '../../chat/ConversationMode';
 import { Markdown } from '../../chat/Markdown';
 import { ORB_COLOR } from '../../chat/Orb';
@@ -44,7 +45,7 @@ const HEADER_ORB = 40;              // slice 6: the neural orb as a badge beside
 export default function Conversation() {
   const insets = useSafeAreaInsets();
   const { cfg, checked, prefs, levels, recording, setRecording, speaker, chat, reload } = useApp();
-  const { state, send, sendRecording, warmUp, retry, startNewChat, decide, stop, showCommand } = chat;
+  const { state, send, sendRecording, adoptVoiceTurn, warmUp, retry, startNewChat, decide, stop, showCommand } = chat;
   const [draft, setDraft] = useState('');
   const params = useLocalSearchParams<{ record?: string; draft?: string; reply?: string; replyLabel?: string; replyText?: string }>();
   // Slice 4: "Ask about this" in the Inbox. The next message (typed or spoken) answers that one.
@@ -129,11 +130,21 @@ export default function Conversation() {
     warmUp();
   }, [speaker, warmUp]);
 
-  const onRecording = useCallback((uri: string, ms: number) => {
+  const onRecording = useCallback((uri: string, ms: number, requestId?: string) => {
     const answering = replyTo?.id;
     setReplyTo(null);
-    return sendRecording(uri, ms, prefs.speakVoiceReplies, answering);
+    return sendRecording(uri, ms, prefs.speakVoiceReplies, answering, requestId);
   }, [sendRecording, prefs.speakVoiceReplies, replyTo]);
+
+  /** A live voice note the server already submitted: it joins the chat like an uploaded one. */
+  const live = useMemo(() => ({
+    spoken: prefs.speakVoiceReplies,
+    replyTo: replyTo?.id,
+    onTurn: (id: string, status: RequestStatus, audioUri?: string) => {
+      setReplyTo(null);
+      adoptVoiceTurn(id, status, prefs.speakVoiceReplies, replyTo?.id, audioUri);
+    },
+  }), [adoptVoiceTurn, prefs.speakVoiceReplies, replyTo]);
 
   /** A misheard word is fixed by a new message, never by rewriting what was sent. */
   const onCorrect = useCallback((heard: string) => setDraft(`I meant: ${heard}`), []);
@@ -194,7 +205,7 @@ export default function Conversation() {
           <ApprovalTray approvals={waiting} onDecide={decide} />
           {replyTo ? <ReplyChip label={replyTo.label} text={replyTo.text} onClear={() => setReplyTo(null)} /> : null}
           <Composer cfg={cfg} onCommandReply={showCommand} enabled={!!cfg} draft={draft} setDraft={setDraft} onSendText={onSend}
-            onRecordStart={onRecordStart} onRecording={onRecording} levels={levels} onActiveChange={setRecording}
+            onRecordStart={onRecordStart} onRecording={onRecording} live={live} levels={levels} onActiveChange={setRecording}
             autoStart={autoRecord} onAutoStarted={() => setAutoRecord(false)}
             onConversation={() => { speaker.stop(); setTalking(true); }}
             attachments={attach.items} onAttach={onAttach} onRemoveAttachment={attach.remove}

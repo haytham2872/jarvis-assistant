@@ -71,6 +71,8 @@ The iPhone app reads answers aloud: the server turns the final, checked answer i
 spoken version (no Markdown; every word the answer's own, a very long one read from the start) and Google's Chirp 3 HD
 Fenrir voice says it in clips, the French Fenrir for French. The phone plays them; the
 server plays nothing. Without Google's voice the iPhone's own reads.
+A turn «he» will hear is voiced sentence by sentence as JARVIS writes it; a sentence that
+claims something was saved, sent or set waits for the checked answer.
 
 ### Active transcription
 
@@ -80,6 +82,8 @@ int8 ONNX), English and French, mixed in one sentence included; faster-whisper i
 fallback. The model loads on the first voice note and is released after 10 idle minutes;
 text startup loads nothing. Before answering a voice note JARVIS posts what he heard, and he
 is told it is a transcript: names and figures can be misheard, so he says them back.
+The iPhone streams its microphone while «he» talks: each stretch of speech is transcribed at a
+pause, and in conversation mode a small local model (Smart Turn) hears when «he» has finished.
 
 «Owner» can also send images and documents, on Discord or from the iPhone app (attached, or
 shared from any app through the "Share to JARVIS" Shortcut). Images go into the turn itself (the
@@ -148,8 +152,8 @@ shows three days: drag a block, add one in a free slot, or apply a proposal.
 Portfolio charts the value against cost, allocation, movers and splits to approve; each stock shows a chart
 with «his» trades, average cost and thesis levels. A level «he» drags to and taps becomes a
 watch or thesis condition. «He» tells JARVIS «his» trades. Inbox keeps JARVIS's messages (👍/👎 rates research); a tap asks about one. The composer's command button lists the slash commands. «He» chooses
-Discord, phone or both for delivery. Any message can be read aloud; conversation mode sends when «he»
-stops talking. Activity shows work with pause and resume, and goals with milestones, budgets, questions and cited results; «he»
+Discord, phone or both for delivery. Any message can be read aloud; in conversation mode the server ends
+«his» turn when «he» has finished. Activity shows work with pause and resume, and goals with milestones, budgets, questions and cited results; «he»
 starts, pauses, resumes or cancels them and reviews voice answers. Track record shows
 gut/corrected calibration, scores, open calls and source quotes; thin records say too early
 to tell. While you slept shows overnight work, quiet nights, failures and notes, remembering

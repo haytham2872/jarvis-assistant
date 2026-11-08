@@ -147,3 +147,33 @@ def test_chat_specifically_no_longer_has_a_bare_intent_local():
     from backend.brain import engine
     assert "intent" not in engine.chat.__code__.co_varnames
     assert "intent_context" in engine.chat.__code__.co_varnames
+
+
+# ------------------------------------------------------------------ live speech (phone)
+
+@pytest.mark.parametrize("sentence", [
+    "I've set the reminder for 9.", "The email was sent.", "the ledger is empty",
+    "I've recorded the trade.", "I just sent it, check your mail.",
+    "I've recorded the decline.",
+])
+def test_a_claim_sentence_is_not_speakable(sentence):
+    from backend.brain import engine
+    assert engine.speakable(sentence) is False
+
+
+@pytest.mark.parametrize("sentence", [
+    "Let me check.", "Your meeting is at nine.", "Il est neuf heures.", "I can't do that yet.",
+    "The email from Sarah is about the lease.",
+])
+def test_an_ordinary_sentence_is_speakable(sentence):
+    from backend.brain import engine
+    assert engine.speakable(sentence) is True
+
+
+def test_a_spoken_phone_turn_runs_no_foreground_plan_and_is_told_to_lead_with_the_answer():
+    import inspect
+    from backend.brain import engine
+    src = inspect.getsource(engine.chat)
+    line = src.split("allow_foreground_plan=")[1].split("\n")[0]
+    assert 'channel == "mobile" and _turn_input.spoken.get()' in line and "goal_offer" in line
+    assert "Put the answer in your first sentence and keep that sentence short" in engine._SPOKEN_NOTE

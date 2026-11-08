@@ -63,6 +63,15 @@ def decode(path: str) -> np.ndarray:
     return np.concatenate(chunks).astype(np.float32) / 32768.0
 
 
+def no_spin(so):
+    """Idle ONNX threads sleep instead of busy-waiting. Parakeet, Silero and Smart Turn each
+    have a thread pool; on 2 cores their spinning threads fought, and a 2.3 s piece took
+    2.4 s to transcribe instead of 0.72 s (measured 7 November 2026, desk pinned to 2 cores)."""
+    so.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    so.add_session_config_entry("session.inter_op.allow_spinning", "0")
+    return so
+
+
 def _load_parakeet():
     import onnx_asr
     import onnxruntime as ort
@@ -71,7 +80,15 @@ def _load_parakeet():
     so.inter_op_num_threads = 1
     so.enable_cpu_mem_arena = False      # +700 MB instead of +1,070 MB (measured)
     so.enable_mem_pattern = False
-    model = onnx_asr.load_model(PARAKEET, quantization="int8", sess_options=so)
+    no_spin(so)
+    # The mel preprocessor is its own ONNX session with its own (spinning, all-core) pool
+    # unless told otherwise: the second half of the fight no_spin describes.
+    pre = ort.SessionOptions()
+    pre.intra_op_num_threads = 1
+    pre.inter_op_num_threads = 1
+    model = onnx_asr.load_model(PARAKEET, quantization="int8", sess_options=so,
+                                preprocessor_config={"sess_options": no_spin(pre),
+                                                     "max_concurrent_workers": 1})
     # The model reads up to ~25 s at a time; the VAD cuts a long note into speech segments.
     model = model.with_vad(onnx_asr.load_vad("silero", sess_options=so))
 
@@ -183,3 +200,5 @@ if __name__ == "__main__":
         logging.basicConfig(level=logging.INFO)
         _load()
         print("Parakeet ready" if _kind == "parakeet" else "Parakeet could not load: see the warning above")
+        from backend.audio import turn_detect
+        turn_detect.download()

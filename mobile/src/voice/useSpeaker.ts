@@ -7,11 +7,11 @@ import * as Speech from 'expo-speech';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
-import { fetchClipBytes, getSpeechPlan } from '../chat/client';
+import { fetchClipBytes, fetchLiveClip, getSpeechPlan } from '../chat/client';
 import { PLAYER_OPTIONS } from '../core/audio';
 import type { ServerConfig } from '../core/api';
 import { playbackLevel, type LevelBus } from './levels';
-import { IDLE, SpeechQueue, type Ended, type Lang, type SpeakState } from './speechQueue';
+import { IDLE, SpeechQueue, type Ended, type Lang, type LiveSpeechEvent, type SpeakState } from './speechQueue';
 
 const LOCAL_VOICE: Record<Lang, string> = { en: 'en-US', fr: 'fr-FR' };
 
@@ -19,6 +19,12 @@ function clipFile(revision: string, seq: number): File {
   const dir = new Directory(Paths.cache, 'speech');
   if (!dir.exists) dir.create({ intermediates: true });
   return new File(dir, `${revision.replace(/[^\w-]/g, '')}-${seq}.mp3`);
+}
+
+function liveClipFile(requestId: string, seq: number): File {
+  const dir = new Directory(Paths.cache, 'speech');
+  if (!dir.exists) dir.create({ intermediates: true });
+  return new File(dir, `live-${requestId.replace(/[^\w-]/g, '')}-${seq}.mp3`);
 }
 
 export function useSpeaker(cfg: ServerConfig | null, rate: number, levels?: LevelBus) {
@@ -73,6 +79,16 @@ export function useSpeaker(cfg: ServerConfig | null, rate: number, levels?: Leve
       file.write(bytes);
       return file.uri;
     },
+    fetchLive: async (source, seq) => {
+      const id = source.replace(/^req:/, '');
+      const file = liveClipFile(id, seq);
+      if (file.exists && (file.size ?? 0) > 0) return file.uri;
+      if (!cfgRef.current) throw new Error('not paired');
+      const bytes = await fetchLiveClip(cfgRef.current, id, seq);
+      if (!file.exists) file.create();
+      file.write(bytes);
+      return file.uri;
+    },
     play: (uri) => new Promise<Ended>((resolve) => {
       settle(playing, 'stopped');
       playing.current = resolve;
@@ -115,6 +131,8 @@ export function useSpeaker(cfg: ServerConfig | null, rate: number, levels?: Leve
   }, [queue]);
 
   const speak = useCallback((source: string, text = '') => void queue.speak(source, text), [queue]);
+  /** A sentence (or the end) of a turn still being written: spoken as it arrives. */
+  const live = useCallback((source: string, event: LiveSpeechEvent) => queue.pushLive(source, event), [queue]);
   const stop = useCallback(() => queue.stop(), [queue]);
   /** The speaker button: stop this answer if it is the one being read, else read it. */
   const toggle = useCallback((source: string, text = '') => {
@@ -122,5 +140,5 @@ export function useSpeaker(cfg: ServerConfig | null, rate: number, levels?: Leve
     else void queue.speak(source, text);
   }, [queue, state]);
 
-  return { state, speak, stop, toggle };
+  return { state, speak, live, stop, toggle };
 }

@@ -19,6 +19,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from backend.brain import steering
+from backend.mobile import live_speech
 from backend.mobile.events import HUB
 from backend.storage import exchanges, inbox, mobile_requests, operations
 
@@ -164,7 +165,10 @@ def sink(base_send: Callable[[dict], Awaitable[Any]], run_id: str | None,
     async def send(msg: dict) -> None:
         await base_send(msg)
         if msg.get("type") == "tool_call":
-            msg = {"type": "tool_call", "tool": msg.get("tool"), "detail": tool_detail(msg.get("input"))}
+            live = live_speech.get(request_id)
+            if live:
+                live.on_event(msg)           # a heard turn: one spoken line while the tool runs
+            msg ={"type": "tool_call", "tool": msg.get("tool"), "detail": tool_detail(msg.get("input"))}
         if msg.get("type") in FORWARD:
             HUB.publish({**msg, "run_id": run_id, "request_id": request_id})
     return send

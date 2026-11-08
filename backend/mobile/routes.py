@@ -418,6 +418,68 @@ async def post_recording(request: Request, request_id: str = Query(...),
     return {"transcript": transcript, "status": status, "stt": stt}
 
 
+@router.websocket("/voice/live")
+async def voice_live(ws: WebSocket, request_id: str = "", mode: str = "conversation",
+                     spoken: int = 0, reply_to: str | None = None) -> None:
+    """Live voice: PCM int16 16 kHz frames in, "heard" text as pieces are transcribed, one
+    "turn" when the turn is over (see backend/audio/live.py). A known request_id gets its
+    stored status back at once, nothing transcribed twice."""
+    status = _refusal(ws.headers.get("authorization", ""))
+    if status:
+        await ws.close(code=4404 if status == 404 else 4401)
+        return
+    from backend.audio.live import LiveSession
+    from backend.mobile import conversation
+    if not conversation.valid_request_id(request_id):
+        await ws.close(code=4400)
+        return
+    await ws.accept()
+
+    async def send(msg: dict) -> None:
+        await ws.send_text(json.dumps(msg))
+
+    async def receive():
+        try:
+            msg = await ws.receive()
+        except (WebSocketDisconnect, RuntimeError):
+            return None
+        if msg.get("type") != "websocket.receive":
+            return None
+        if msg.get("bytes") is not None:
+            return msg["bytes"]
+        try:
+            kind = json.loads(msg.get("text") or "").get("type")
+        except (ValueError, AttributeError):
+            return b""
+        return kind if kind in ("end", "cancel") else b""
+
+    try:
+        known = conversation.status(request_id)
+        if known is not None:
+            await send({"type": "turn", "request_id": request_id, "text": known.get("text"),
+                        "status": known})
+            await ws.close(code=1000)
+            return
+        await send({"type": "ready"})
+        result = await LiveSession(mode, send).run(receive)
+        if result.outcome == "turn":
+            try:
+                turn = conversation.submit(request_id, result.text, "voice", spoken=bool(spoken),
+                                           reply_to=_notice_id(reply_to))
+            except conversation.Rejected as exc:
+                await send({"type": "error", "detail": exc.detail})
+            else:
+                await send({"type": "turn", "request_id": request_id, "text": result.text,
+                            "status": turn})
+        elif result.outcome == "error":
+            await send({"type": "error", "detail": result.detail})
+        elif result.outcome in ("empty", "no_speech"):
+            await send({"type": result.outcome})
+        await ws.close(code=1000)
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+
+
 # ------------------------------------------------------------------ M3: spoken answers
 
 @router.get("/speech/plan")
@@ -458,6 +520,32 @@ async def speech_clip(request: Request, source: str = Query(...), revision: str 
     except speech.SpeechError as exc:
         log.warning("mobile speech: clip %s/%d failed: %s", source, seq, exc)
         raise HTTPException(status_code=502, detail=str(exc)[:200]) from None
+    return Response(content=audio, media_type="audio/mpeg",
+                    headers={"X-Engine": engine, "X-Synth-Ms": str(int((time.monotonic() - t0) * 1000)),
+                             "Cache-Control": "private, max-age=1800"})
+
+
+@router.get("/speech/live")
+async def speech_live(request: Request, request_id: str = Query(...),
+                      seq: int = Query(..., ge=0)) -> Response:
+    """One clip of a turn spoken as it was written (live_speech.py) as MP3; waits for a
+    synthesis still in flight. 404 unknown turn or clip, 503 allowance used up, 502 voice
+    failed (the phone then reads that clip with its own voice)."""
+    _authorize(request)
+    from backend.mobile import live_speech, spoken
+    turn = live_speech.get(request_id)
+    if turn is None:
+        raise HTTPException(status_code=404, detail="no such turn")
+    t0 = time.monotonic()
+    try:
+        audio, engine = await turn.clip_bytes(seq)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="no such clip") from None
+    except spoken.OverAllowance as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except (speech.SpeechError, asyncio.TimeoutError) as exc:
+        log.warning("mobile speech: live clip %s/%d failed: %s", request_id, seq, exc)
+        raise HTTPException(status_code=502, detail=str(exc)[:200] or "voice timed out") from None
     return Response(content=audio, media_type="audio/mpeg",
                     headers={"X-Engine": engine, "X-Synth-Ms": str(int((time.monotonic() - t0) * 1000)),
                              "Cache-Control": "private, max-age=1800"})

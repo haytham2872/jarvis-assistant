@@ -280,7 +280,8 @@ TOOLS = [
             _owner.say("Write a file to your personal vault (jarvis-vault/<folder>/<filename>). Use for notes, "
             "observations, creative work, letters to yourself — anything you want to keep. People are "
             "NOT written here: their profiles in people/ go through person_profile, and only once "
-            "«Owner» agrees. This is NOT the intent queue (use vault_write_queue for queue.md) and NOT the "
+            "«Owner» agrees. «His» portrait, people/owner.md, is corrected at session end, not here. "
+            "This is NOT the intent queue (use vault_write_queue for queue.md) and NOT the "
             "night-task/reminder scheduler (use schedule_night_task/schedule_reminder for schedule.md) "
             "— those are separate files with separate tools. The result tells you the exact path written "
             "and confirms it was read back and verified; only report the write as done if it says confirmed. "
@@ -622,8 +623,8 @@ TOOLS = [
             "Use this to add open items at the end of a conversation where something was left "
             "unfinished, to update the status of existing items, or to mark things resolved. "
             "Write the complete updated queue as content — this replaces the existing file. "
-            "Keep entries concise: include a status (open / in_progress / resolved), the date "
-            "added, a short description, and an optional reference to the related vault file. "
+            "Keep entries concise: include a status (open / in_progress / hold / resolved; hold = keep in mind, "
+            "never raise unprompted), the date added, a short description, and an optional reference to the related vault file. "
             "Trivial exchanges do not warrant entries. Use your own judgment on what qualifies. "
             "The result confirms the write was read back and verified — only report it as done if so.")
         ),

@@ -45,6 +45,8 @@ function MapBody({ view, onRefresh }: { view: MindView; onRefresh: () => void })
     <View style={{ paddingHorizontal: space.s4, gap: space.s2, paddingBottom: space.s2 }}>
       <View style={s.spread}><Text style={s.dim}>{count(graph.nodes.length, 'note')}{view.truncated ? ` of ${view.total}` : ''} · {count(graph.edges.length, 'connection')}</Text>
         <View style={{ flexDirection: 'row', gap: space.s4 }}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Portrait" onPress={() => router.push('/mind/portrait')} hitSlop={8} style={{ minHeight: 36, justifyContent: 'center' }}>
+            <Text style={s.link}>Portrait</Text></Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Refresh mind map" onPress={onRefresh} hitSlop={8} style={{ minHeight: 36, justifyContent: 'center' }}>
             <Text style={s.link}>Refresh</Text></Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel={list ? 'Show map' : 'Show list'} onPress={() => setList(!list)} hitSlop={8} style={{ minHeight: 36, justifyContent: 'center' }}>

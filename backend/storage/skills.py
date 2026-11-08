@@ -100,6 +100,22 @@ def use_stats() -> dict[str, dict]:
     return {r[0]: {"uses": int(r[1]), "last": float(r[2])} for r in rows}
 
 
+def use_counts_by_via() -> dict[str, dict[str, int]]:
+    """{skill: {via: n}} over every recorded use."""
+    conn = _conn()
+    if conn is None:
+        return {}
+    try:
+        rows = conn.execute("SELECT skill, via, COUNT(*) FROM skill_uses GROUP BY skill, via").fetchall()
+    except Exception as exc:
+        log.warning("skills store: could not read uses by via (%s)", exc)
+        return {}
+    out: dict[str, dict[str, int]] = {}
+    for skill, via, n in rows:
+        out.setdefault(skill, {})[via] = int(n)
+    return out
+
+
 def uses_between(start_ts: float, end_ts: float) -> dict[str, int]:
     """{skill: openings} in [start_ts, end_ts)."""
     conn = _conn()

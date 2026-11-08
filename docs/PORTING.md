@@ -80,7 +80,7 @@ A ported change that should affect them is applied to them by hand.
 
 ## Watermark
 
-Last private commit reviewed: `d565cd5`
+Last private commit reviewed: `8ea7467`
 
 ## Log
 
@@ -89,6 +89,14 @@ since then is listed, newest first.
 
 | Private | What | Here |
 |---|---|---|
+| `8ea7467` | Queue [hold] status and weekly-unique brief items, the tool-facts block in consolidation, the portrait edited by typed patches and fading, the phone's Portrait screen | ported (the portrait is `people/owner.md` with its history in `people/owner-history.md`; its sections are "Situation", "Who they are", "How to be with them" so they fit any owner) |
+| `b322329` | Discord supervisor, commands shared by Discord and the phone, /pause spares scheduled tasks, research v2 (note kinds, subject matching, rests and retirement, a daily budget, findings to the Inbox, thumbs feedback) | ported (the private server's measurements and incident dates are not copied) |
+| `d3a4b9a` | Implementer agent: move the worktree onto the working branch | not ported: private dev tooling |
+| `3f2874b` | Track skills and agents, ruff in the guard, a server-logs skill | not ported: private dev tooling |
+| `9a56b04` | Code graph rebuilt | not ported: the graph is rebuilt here, never copied |
+| `32d97ff` | Research follows what the owner reads: note opens, a 30-day stop, a monthly brief line | ported |
+| `23cf246` | CLAUDE.md: how development runs (planner, workers, guard, dashboard) | not ported: private CLAUDE.md dev notes |
+| `d43c40e` | CLAUDE.md: the Port: trailer and the jarvis-port skill | not ported: private CLAUDE.md dev notes (the routine is this file) |
 | `d565cd5` | The suite in 2 minutes: one slow test fixed, parallel by default, testmon | ported (CLAUDE.md's test section rewritten here) |
 | `a6925e7` | Qdrant and its client pinned to the versions the private server runs (1.19) | not ported: this project keeps its own pins (Qdrant 1.17.1 with its client) |
 | `171b835` | OpenRouter only, and fixes found while making this copy | nothing to port: it came from here |

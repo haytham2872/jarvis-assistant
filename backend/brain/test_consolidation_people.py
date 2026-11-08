@@ -157,5 +157,6 @@ def test_the_prompt_asks_for_quotes_of_his_words():
         prior_letter_block="x", owner_block="x", queue_block="x", threads_block="x",
         facts_block="x", listening_block="x", sleep_block="x", positions_block="x",
         predictions_block="x", mood_register="x", date_today="2026-09-27",
-        people_block="- Karim (known)", tool_record_block="(none)")
+        people_block="- Karim (known)", tool_record_block="(none)", tool_facts="(none)",
+        portrait_field="x", portrait_rules="x")
     assert "- Karim (known)" in out

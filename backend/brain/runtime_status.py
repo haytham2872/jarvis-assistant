@@ -86,7 +86,13 @@ def runtime_identity_text() -> str:
         delivery = _notices.prompt_line()
     except Exception:
         delivery = ""
-    return "\n".join(part for part in (text, held, waiting, checkin, goal_line, delivery) if part)
+    # ...and while a portrait question from this morning's brief is still open.
+    try:
+        from backend.brain import portrait as _portrait
+        asked = _portrait.prompt_line()
+    except Exception:
+        asked = ""
+    return "\n".join(part for part in (text, held, waiting, checkin, goal_line, delivery, asked) if part)
 
 
 def record_turn() -> None:

@@ -899,6 +899,14 @@ async def get_mind(request: Request) -> Response:
     return _conditional(request, data)
 
 
+@router.get("/mind/portrait")
+async def get_portrait(request: Request) -> Response:
+    _authorize(request)
+    from backend.mobile import portrait_view
+    data = await asyncio.get_running_loop().run_in_executor(None, portrait_view.view)
+    return _conditional(request, data)
+
+
 # ------------------------------------------------------------------ slice 4: Inbox and notifications
 
 _PUSH_TOKEN_MAX = 200

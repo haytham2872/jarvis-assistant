@@ -210,7 +210,9 @@ def test_prompt_formats_with_empty_new_blocks():
         facts_block="x", listening_block="x", sleep_block="x",
         positions_block="(none yet)", predictions_block="(none — output an empty predictions_scored array)",
         mood_register="x", date_today="2026-07-16", people_block="(none)",
-        tool_record_block="(none)",
+        tool_record_block="(none)", tool_facts="(none)",
+        portrait_field=consolidation._PORTRAIT_PATCH_FIELD,
+        portrait_rules=consolidation._PORTRAIT_PATCH_RULES,
     )
     assert "(none yet)" in out
     assert "predictions_scored" in out
@@ -224,7 +226,9 @@ def test_prompt_formats_with_full_new_blocks():
         positions_block="## nietzsche\n**Stance:** ...",
         predictions_block="1. (made 2026-07-14) He'll bring up X.",
         mood_register="x", date_today="2026-07-16", people_block="(none)",
-        tool_record_block="(none)",
+        tool_record_block="(none)", tool_facts="(none)",
+        portrait_field=consolidation._PORTRAIT_PATCH_FIELD,
+        portrait_rules=consolidation._PORTRAIT_PATCH_RULES,
     )
     assert "## nietzsche" in out
     assert "He'll bring up X." in out

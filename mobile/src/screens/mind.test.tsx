@@ -42,6 +42,11 @@ beforeEach(() => {
 });
 afterEach(() => jest.useRealTimers());
 
+it('opens the portrait screen from the header', async () => {
+  await render(<MindScreen />); await flush();
+  await fireEvent.press(screen.getByLabelText('Portrait'));
+  expect(mockPush).toHaveBeenCalledWith('/mind/portrait');
+});
 it('groups the fallback by folder, follows connections in the sheet and opens the exact goal result', async () => {
   await render(<MindScreen />); await flush();
   expect(screen.getByTestId('mind-list')).toBeTruthy();

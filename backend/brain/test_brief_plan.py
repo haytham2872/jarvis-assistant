@@ -16,7 +16,7 @@ BLOCKS = "- 09:00-17:00 work\n- 17:30-18:30 gym"
 def quiet(monkeypatch):
     """Everything else the brief reads is empty; only the plan speaks."""
     monkeypatch.setattr(chronos, "_collect_research_trail", lambda now: "")
-    monkeypatch.setattr(chronos, "_collect_open_intents", lambda: "")
+    monkeypatch.setattr(chronos, "_collect_open_intents", lambda now=None: [])
     monkeypatch.setattr(chronos, "_collect_todays_reminders", lambda now: "")
     monkeypatch.setattr(chronos, "_collect_expensive_turns", lambda: "")
 

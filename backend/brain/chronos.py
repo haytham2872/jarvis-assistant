@@ -44,6 +44,7 @@ from backend import owner as _owner
 
 import re
 import json
+import hashlib
 import asyncio
 import logging
 import datetime
@@ -1228,7 +1229,7 @@ Overnight task findings («owner» explicitly asked for these — lead with them
 Autonomous research passes since yesterday:
 {research_trail}
 
-Open intents from the queue:
+Queue items that need «him» or have moved (each appears at most once a week; one line each, never as a standing reminder):
 {intents}
 
 Today's reminders:
@@ -1262,14 +1263,45 @@ def _collect_research_trail(now: datetime.datetime) -> str:
     return "\n".join(keep[-10:])
 
 
-def _collect_open_intents() -> str:
+_INTENT_RE = re.compile(r"^\s*-?\s*\[(open|in_progress)\]")
+_INTENT_MAX = 5
+_INTENT_REPEAT_DAYS = 7
+_INTENT_SEEN_KEEP = 300
+
+
+def _intent_key(line: str) -> str:
+    return hashlib.sha1(" ".join(line.split()).encode("utf-8")).hexdigest()[:12]
+
+
+def _collect_open_intents(now: Optional[datetime.datetime] = None) -> list[tuple[str, str]]:
+    """Actionable queue items as (key, line): [open]/[in_progress] only, at most 5, and
+    none that a delivered brief already gave in the last 7 days. An item whose text
+    changed has a new key, so it counts as new."""
+    now = now or now_local()
     try:
         content = (_PROJECT_ROOT / "jarvis-vault" / "queue.md").read_text(encoding="utf-8")
     except Exception:
-        return ""
-    keep = [l.strip() for l in content.splitlines()
-            if l.strip() and not l.strip().startswith("#") and "resolved" not in l.lower()]
-    return "\n".join(keep[:8])
+        return []
+    seen = _load_state().get("brief_intents_seen") or {}
+    today = now.date()
+    out: list[tuple[str, str]] = []
+    for raw in content.splitlines():
+        line = raw.strip()
+        if not _INTENT_RE.match(line):
+            continue
+        key = _intent_key(line)
+        try:
+            last = datetime.date.fromisoformat(str(seen[key]))
+            if (today - last).days < _INTENT_REPEAT_DAYS:
+                continue
+        except (KeyError, ValueError):
+            pass
+        if any(k == key for k, _ in out):
+            continue
+        out.append((key, line))
+        if len(out) >= _INTENT_MAX:
+            break
+    return out
 
 
 def _collect_todays_reminders(now: datetime.datetime) -> str:
@@ -1324,7 +1356,8 @@ async def _collect_calendar() -> str:
 
 
 async def compose_brief(now: Optional[datetime.datetime] = None,
-                        night_results: Optional[list[dict]] = None) -> str:
+                        night_results: Optional[list[dict]] = None,
+                        intents: Optional[list[tuple[str, str]]] = None) -> str:
     """Build the morning brief text. Consumes stored night results. Falls back
     to a plain formatted digest when the LLM call fails — a degraded brief
     still beats a silent morning."""
@@ -1343,7 +1376,9 @@ async def compose_brief(now: Optional[datetime.datetime] = None,
         f"Task: {r['task']}\nFindings: {r['summary']}" for r in night_results
     )
     research_trail = _collect_research_trail(now)
-    intents = _collect_open_intents()
+    if intents is None:
+        intents = _collect_open_intents(now)
+    intents_text = "\n".join(line for _key, line in intents)
     reminders = _collect_todays_reminders(now)
     calendar = await _collect_calendar()
     plan_today = _collect_plan_today(now)
@@ -1353,21 +1388,22 @@ async def compose_brief(now: Optional[datetime.datetime] = None,
     skills_line = _collect_skills_overnight(now)
     goals_line = _collect_goals_line()
     reading_line = _collect_reading_line(now)
+    portrait_line = _collect_portrait_line(now)[0]
     try:
         from backend.brain import research
         digest_line = research.digest_line(now.timestamp())
     except Exception:
         digest_line = ""
-    tail = "\n".join(l for l in (portfolio_line, skills_line, goals_line, reading_line, digest_line) if l)
+    tail = "\n".join(l for l in (portfolio_line, skills_line, goals_line, reading_line, portrait_line, digest_line) if l)
 
-    if not any([nights_text, research_trail, intents, reminders, calendar, plan_today, expensive, tail]):
+    if not any([nights_text, research_trail, intents_text, reminders, calendar, plan_today, expensive, tail]):
         return f"Morning. Quiet night — nothing new overnight, nothing on the schedule for today. ({now.strftime('%A %H:%M')})"
 
     prompt = _BRIEF_PROMPT.format(
         now=now.strftime("%A %Y-%m-%d %H:%M"),
         night_results=nights_text or "(none)",
         research_trail=research_trail or "(none)",
-        intents=intents or "(none)",
+        intents=intents_text or "(none)",
         reminders=reminders or "(none)",
         calendar=calendar or "(none)",
         plan=plan_today or "(none)",
@@ -1389,7 +1425,7 @@ async def compose_brief(now: Optional[datetime.datetime] = None,
     if nights_text:     parts.append("Overnight findings:\n" + nights_text)
     if research_trail:  parts.append("Research passes:\n" + research_trail)
     if reminders:       parts.append("Today's reminders:\n" + reminders)
-    if intents:         parts.append("Open intents:\n" + intents)
+    if intents_text:    parts.append("Queue items:\n" + intents_text)
     if calendar:        parts.append("Calendar:\n" + calendar)
     if plan_today:      parts.append("Planned blocks today:\n" + plan_today)
     if expensive:       parts.append("Expensive turns:\n" + expensive)
@@ -1428,6 +1464,48 @@ def _collect_reading_line(now: datetime.datetime) -> str:
                 + ". Open the note or ask me and it comes back.")
     except Exception:
         return ""
+
+
+_PORTRAIT_ASKED_KEEP = 200
+
+
+def _portrait_key(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _fading_portrait_lines(today: str) -> list[str]:
+    from backend.brain import consolidation, portrait
+    return portrait.fading(consolidation._current_portrait(), today)
+
+
+def _collect_portrait_line(now: datetime.datetime) -> tuple[str, list[str]]:
+    """(line, keys): up to two Situation lines about to fade that the brief has not asked about
+    yet, in one code-written question. ("", []) on nothing to ask or any failure."""
+    try:
+        asked = _load_state().get("portrait_asked") or {}
+        fresh = [(t, _portrait_key(t)) for t in _fading_portrait_lines(now.strftime("%Y-%m-%d"))]
+        fresh = [(t, k) for t, k in fresh if k not in asked][:2]
+        if not fresh:
+            return "", []
+        line = ("Before these leave my picture of you, are they still true? · "
+                + " · ".join(t for t, _ in fresh) + " (tell me either way)")
+        return line, [k for _, k in fresh]
+    except Exception:
+        return "", []
+
+
+def portrait_asked_recently(days: int = 3) -> list[str]:
+    """Texts of fading Situation lines the brief asked about in the last `days` days."""
+    try:
+        today = now_local().date()
+        asked = _load_state().get("portrait_asked") or {}
+        recent = {k for k, d in asked.items()
+                  if 0 <= (today - datetime.date.fromisoformat(str(d))).days <= days}
+        if not recent:
+            return []
+        return [t for t in _fading_portrait_lines(today.isoformat()) if _portrait_key(t) in recent]
+    except Exception:
+        return []
 
 
 def _collect_goals_line() -> str:
@@ -1493,7 +1571,9 @@ def _collect_expensive_turns() -> str:
 
 def _mark_briefed(now: datetime.datetime,
                   reported_results: Optional[list[dict]] = None,
-                  reading_reported: bool = False) -> None:
+                  reading_reported: bool = False,
+                  portrait_reported: Optional[list[str]] = None,
+                  reported_intents: Optional[list[str]] = None) -> None:
     """Record delivery and consume only the night results included in that brief.
 
     A06: these two facts belong together. Marking without consuming would repeat the
@@ -1511,6 +1591,20 @@ def _mark_briefed(now: datetime.datetime,
         state["last_brief_date"] = now.strftime("%Y-%m-%d")
         if reading_reported:
             state["reading_report_date"] = now.strftime("%Y-%m-%d")
+        if portrait_reported:
+            asked = state.get("portrait_asked")
+            asked = dict(asked) if isinstance(asked, dict) else {}
+            for k in portrait_reported:
+                asked[k] = now.strftime("%Y-%m-%d")
+            newest = sorted(asked.items(), key=lambda kv: str(kv[1]))[-_PORTRAIT_ASKED_KEEP:]
+            state["portrait_asked"] = dict(newest)
+        if reported_intents:
+            seen = state.get("brief_intents_seen")
+            seen = dict(seen) if isinstance(seen, dict) else {}
+            for k in reported_intents:
+                seen[k] = now.strftime("%Y-%m-%d")
+            newest = sorted(seen.items(), key=lambda kv: str(kv[1]))[-_INTENT_SEEN_KEEP:]
+            state["brief_intents_seen"] = dict(newest)
         if covered is None:
             state["night_results"] = []
             return
@@ -1527,7 +1621,8 @@ def _mark_briefed(now: datetime.datetime,
 
 async def _send_brief(now: datetime.datetime) -> bool:
     covered = [dict(item) for item in _load_state().get("night_results", [])]
-    text = await compose_brief(now, night_results=covered)
+    intents = _collect_open_intents(now)
+    text = await compose_brief(now, night_results=covered, intents=intents)
     sent = False
     if _notifier is not None:
         try:
@@ -1537,7 +1632,10 @@ async def _send_brief(now: datetime.datetime) -> bool:
             log.debug("chronos: brief DM failed: %s", e)
     if sent:
         reading = _collect_reading_line(now)
-        _mark_briefed(now, covered, reading_reported=bool(reading) and reading in text)
+        p_line, p_keys = _collect_portrait_line(now)
+        _mark_briefed(now, covered, reading_reported=bool(reading) and reading in text,
+                      portrait_reported=p_keys if p_line and p_line in text else None,
+                      reported_intents=[k for k, _ in intents])
         log.info("chronos: morning brief sent")
         await _offer_skill_routines()
     else:
@@ -1550,9 +1648,12 @@ async def brief_now(deliver: Optional[Callable[[str], Awaitable[bool]]] = None) 
     """Compose on demand; acknowledge only after Discord confirms every chunk."""
     now = now_local()
     covered = [dict(item) for item in _load_state().get("night_results", [])]
-    text = await compose_brief(now, night_results=covered)
+    intents = _collect_open_intents(now)
+    text = await compose_brief(now, night_results=covered, intents=intents)
     if deliver is not None and await deliver(text):
-        _mark_briefed(now, covered)
+        p_line, p_keys = _collect_portrait_line(now)
+        _mark_briefed(now, covered, reported_intents=[k for k, _ in intents],
+                      portrait_reported=p_keys if p_line and p_line in text else None)
     return text
 
 

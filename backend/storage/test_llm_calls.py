@@ -338,7 +338,7 @@ def test_the_brief_is_told_about_an_expensive_turn(monkeypatch):
     # An otherwise quiet night: the expensive turn alone must still reach the brief.
     for name in ("_collect_research_trail", "_collect_todays_reminders"):
         monkeypatch.setattr(chronos, name, lambda now: "")
-    monkeypatch.setattr(chronos, "_collect_open_intents", lambda: "")
+    monkeypatch.setattr(chronos, "_collect_open_intents", lambda now=None: [])
     _turn_rows("r-deep", "compile the NVDA research", [0.4])
     run(chronos.compose_brief(night_results=[]))
     assert "compile the NVDA research" in prompts[0]

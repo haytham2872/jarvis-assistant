@@ -12,7 +12,7 @@ import type { ChartRange, HoldingView, ProposalResult, TotalHistory } from './ty
 import type { WeekChange, WeekContext, WeekView } from './types';
 import type { RecordView } from './types';
 import type { OvernightView, VaultNote } from './types';
-import type { MindView } from './types';
+import type { MindView, PortraitView } from './types';
 
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -295,6 +295,7 @@ export const getVaultNote = (cfg: ServerConfig, folder: string, name: string, ca
 
 // slice 7: the mind map
 export const getMind = (cfg: ServerConfig, cache?: Conditional<MindView>) => call<MindView>(cfg, '/mind', {}, cache);
+export const getPortrait = (cfg: ServerConfig, cache?: Conditional<PortraitView>) => call<PortraitView>(cfg, '/mind/portrait', {}, cache);
 
 // slice 5: the track record
 export const getRecord = (cfg: ServerConfig, cache?: Conditional<RecordView>) => call<RecordView>(cfg, '/record', {}, cache);

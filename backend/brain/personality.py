@@ -1168,6 +1168,9 @@ _LETTER_FRAME = (
 
 _OWNER_FRAME = (
     _owner.say("[«owner» — a living portrait you maintain and update over time. "
+    "It is updated by edits at the end of each session, so a correction «he» gives "
+    "lands then. \"(as of date)\" is when a line was last confirmed: an old Situation "
+    "line is likely, not certain, still true. "
     "Read this before responding. Use it naturally, not as a reference "
     "you consult aloud.]")
 )

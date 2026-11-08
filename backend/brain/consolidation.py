@@ -168,6 +168,42 @@ def _listening_log_tail() -> str:
 # Prompt
 # ---------------------------------------------------------------------------
 
+# The portrait part of the prompt. A v2 portrait (backend/brain/portrait.py) is changed by
+# typed edits; one that is not v2 yet is rewritten once, in the v2 format. These are
+# substituted into _PROMPT after it is formatted, so their braces are written for the JSON
+# they sit in.
+_PORTRAIT_FORMAT = _owner.say(
+    "First line after the title: <!-- portrait v2 -->. Then three sections: "
+    "## Situation (what is true now and can change), ## Who they are, ## How to be with them "
+    "(both lasting). Each entry is a line '- text (as of YYYY-MM-DD)'."
+)
+_PORTRAIT_REWRITE_FIELD = (
+    '"owner_update": "The portrait is not in the new format yet: write the whole of '
+    'owner.md once, in it. ' + _PORTRAIT_FORMAT + ' Carry over what is lasting and what '
+    'still holds; leave out dated events, commit hashes, command lists and tool limits '
+    '(those belong in letters). Use today\'s date on every entry. 400 words at most.",'
+)
+_PORTRAIT_PATCH_FIELD = (
+    '"portrait_patch": [{"section": "Situation or Who they are or How to be with them", '
+    '"action": "add or revise or remove or confirm", "match": "a substring identifying '
+    'exactly one existing entry of that section (not for add)", "text": "the entry without '
+    'its date (for add and revise)"}],'
+)
+_PORTRAIT_REWRITE_RULES = (
+    "owner_update: this is the one-time move to the new portrait format; after it the "
+    "portrait changes by small edits only."
+)
+_PORTRAIT_PATCH_RULES = (
+    "portrait_patch: [] unless this session changes the portrait. Small edits, never a "
+    "rewrite; the code dates them. Correct or remove (revise, remove) a line the session "
+    "shows is wrong or stale. Confirm a Situation line the session shows still holds; a "
+    "Situation line nobody confirms leaves the portrait on its own after 45 days. "
+    "Situation = what is true now and can change; Who they are and How to be with them = "
+    "lasting. Keep tool limits, commit hashes, command lists and dated incidents out of "
+    "the portrait: those belong in letters. Do not add a line that restates one already there."
+)
+
+
 _PROMPT = _owner.say("""\
 You are JARVIS. A session with «owner» just ended. Consolidate it into the vault.
 
@@ -179,6 +215,9 @@ CURRENT «OWNER» PORTRAIT:
 
 CURRENT QUEUE:
 {queue_block}
+
+What the tools confirm right now:
+{tool_facts}
 
 SESSION (chronological):
 {threads_block}
@@ -215,14 +254,9 @@ prior letter — mark resolved questions, carry forward open ones, add new \
 observations from this session. Honest about discontinuity. Tone matches \
 current mood.",
 
-  "owner_update": "Full rewrite of owner.md. Keep the ## Situation, \
-## Recurring themes, ## Observations structure. Absorb new observations into \
-the existing text rather than appending. ≤500 words.",
+  {portrait_field}
 
-  "queue_update": "Full updated queue.md. Keep existing open/in_progress items \
-verbatim. Add new entries only if something was genuinely left unresolved. \
-Mark done things resolved. Format per line: \
-[open|in_progress|resolved] YYYY-MM-DD — description",
+  "queue_update": "Full updated queue.md. One line per item: [open|in_progress|hold|resolved] YYYY-MM-DD — description. open/in_progress = there is a next step (yours or «his»). hold = context to keep in mind but never raise unprompted (use it instead of writing 'do not raise' on an open item). Mark resolved anything whose next step has happened, that the tool facts below answer, or whose premise is gone. Rules about your own behaviour go under '## Note to self', never as items. Add new entries only if something was genuinely left unresolved. Copy items you are not changing word for word.",
 
   "predictions_scored": [{{"n": 1, "verdict": "right|wrong|unclear", "evidence": "one sentence of what actually happened"}}],
   "predictions_new": ["falsifiable prediction about «owner» for the next session", "..."],
@@ -272,10 +306,14 @@ predictions_scored: score EVERY numbered pending prediction above, one entry \
 each, matching its number. "right" only when this session gave real evidence \
 FOR it; "wrong" when it gave evidence AGAINST it; "unclear" when the session \
 gave no real evidence either way — unclear is the honest default, not a \
-last resort. If any prediction came out wrong, the owner_update rewrite \
+last resort. If any prediction came out wrong, the portrait update \
 above MUST absorb what you misunderstood — name the correction in the \
 portrait itself, don't just note it here. Output an empty array if no \
 pending predictions were supplied.
+
+{portrait_rules}
+
+queue_update: go through every item. An item that only tells you how to behave, or says "do not raise", is [hold] or moves to Note to self. An item asking to confirm, verify or wait for something that "What the tools confirm" shows has already happened (a skill run by a routine, a goal that ended) is resolved: the tool record is the confirmation, nobody needs to check again. An item waiting for a tool, folder or permission to edit «his» portrait is resolved: the portrait changes only through this consolidation, and needs nothing else.
 
 predictions_new: 2-4 concrete, falsifiable predictions about «owner» for the \
 NEXT session — how «he»'ll react to something specific, what «he»'ll bring up \
@@ -388,6 +426,44 @@ async def _call_compat(prompt: str) -> str:
         return ""
 
 
+def _tool_facts() -> str:
+    """Short read-only block of what the tools already confirm (skills, goals,
+    schedule). Each part is "" when its source fails or is empty; never raises."""
+    parts: list[str] = []
+    try:
+        from backend.storage import skills
+        rows = []
+        for name, by_via in sorted(skills.use_counts_by_via().items()):
+            # Spelled out: the replay showed "routine 60" did not close an item asking for a
+            # first skill-driven run; "ran 60 times as a scheduled routine" does.
+            words = {"routine": "as a scheduled routine following it",
+                     "model": "opened by you in conversation",
+                     "command": "run by the owner with /skill"}
+            rows.append(f"{name}: " + ", ".join(
+                f"{n} times {words.get(v, 'via ' + v)}" for v, n in sorted(by_via.items())))
+        if rows:
+            parts.append("Skills used so far: " + "; ".join(rows))
+    except Exception:
+        pass
+    try:
+        from backend.storage import goals
+        rows = [f"{g.get('title', '?')} [{g.get('state', '?')}]" for g in goals.list_goals()]
+        if rows:
+            parts.append("Goals: " + "; ".join(rows))
+    except Exception:
+        pass
+    try:
+        from backend.brain import chronos
+        n = sum(1 for ln in chronos._read_schedule()
+                if chronos._parse_reminder_line(ln) or chronos._parse_night_line(ln)
+                or chronos._parse_task_line(ln))
+        if n:
+            parts.append(f"{n} scheduled items")
+    except Exception:
+        pass
+    return "\n".join(parts)[:700]
+
+
 async def _generate_consolidation(
     threads:              list[dict],
     prior_letter:         str,
@@ -418,10 +494,27 @@ async def _generate_consolidation(
         loop.run_in_executor(None, _listening_log_tail),
     )
 
+    from backend.brain import portrait as _portrait
+    v2 = _portrait.is_v2(owner_md)
+    portrait_rules = _PORTRAIT_PATCH_RULES if v2 else _PORTRAIT_REWRITE_RULES
+    if v2:
+        try:
+            from backend.brain import chronos as _chronos
+            asked = _chronos.portrait_asked_recently()
+        except Exception:
+            asked = []
+        if asked:
+            portrait_rules += (
+                _owner.say(" The brief asked «him» whether these still hold: " + "; ".join(asked) + ". "
+                           "If the session shows «his» answer, confirm what still holds and revise or remove "
+                           "what «he» corrected; with no answer, leave them (they fade on their own)."))
     prompt = _PROMPT.format(
+        portrait_field     = _PORTRAIT_PATCH_FIELD if v2 else _PORTRAIT_REWRITE_FIELD,
+        portrait_rules     = portrait_rules,
         prior_letter_block = prior_letter_block,
         owner_block      = owner_block,
         queue_block        = queue_block,
+        tool_facts         = _tool_facts() or "(none)",
         threads_block      = _format_threads_block(threads),
         facts_block        = facts_block or "(none)",
         listening_block    = listening_block or "(none)",
@@ -766,6 +859,42 @@ async def _apply_queue_update(update: str, base: dict | None, attempts: int = 3)
     return result
 
 
+def _current_portrait() -> str:
+    path = _VAULT / "people" / "owner.md"
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+async def _apply_portrait(ops, date_str: str) -> str:
+    """Typed edits to a v2 portrait, then aging. Returns a vault_write-style result string.
+
+    Applied to the file as it is now, not the copy the model was shown: ops match by
+    substring, so they land correctly on whatever is current, and the write carries the
+    revision of exactly what was patched. The aged lines go to people/owner-history.md
+    FIRST, and that append skips lines already in the file, so a retry after a failed
+    portrait write (or a replay) neither loses them nor writes them twice. The caller's
+    per-output state keeps a finished portrait from being patched again.
+    """
+    from backend.brain import portrait as _portrait
+    from backend.tools import vault as _vault
+
+    current = _current_portrait()
+    rev = _vault.note_revision("people", "owner.md")
+    new_md, report = _portrait.apply_patch(current, ops if ops is not None else [], date_str)
+    for r in report:
+        log.info("consolidation: portrait_patch -- %s", r)
+    new_md, aged = _portrait.age_out(new_md, date_str)
+    if aged:
+        hist_path = _VAULT / "people" / "owner-history.md"
+        hist = hist_path.read_text(encoding="utf-8") if hist_path.exists() else ""
+        res = await _vault.vault_write(
+            "owner-history.md", _portrait.append_history(hist, aged, date_str), "people")
+        if not _write_landed("history", res)[0]:
+            return res
+    if new_md == current:
+        return "Portrait unchanged (0 chars written)."
+    return await _vault.vault_write("owner.md", new_md, "people", expected_revision=rev)
+
+
 # One consolidation per session at a time. Three paths can close the same session --
 # the next message after a gap, the quiet-session loop (session_close.py), and shutdown --
 # and two running together would both generate a proposal and apply it: the mood-patterns
@@ -803,6 +932,7 @@ async def _consolidate_session(session_id: Optional[str]) -> None:
         queue_revision,
     )
     from backend.brain import predictions as _predictions
+    from backend.brain import portrait as _portrait
 
     # A05 slice 1: completion is per-output state, not "a letter file exists".
     # The old test meant one failed write (invisible, because the gather's results were
@@ -933,7 +1063,12 @@ async def _consolidate_session(session_id: Optional[str]) -> None:
     # generation-time revision; the queue additionally merges instead of losing either
     # side. `base is None` means a proposal saved before this existed -- written as
     # before, since there is no generation-time state to check it against.
-    if data.get("owner_update"):
+    # Decided on the file as it is now: a v2 portrait takes typed edits (and ages out its
+    # stale Situation lines) and ignores a stray full rewrite; any other takes the one
+    # migration rewrite.
+    if _portrait.is_v2(_current_portrait()):
+        planned.append(("owner", _apply_portrait(data.get("portrait_patch"), date_str)))
+    elif data.get("owner_update"):
         planned.append(("owner", vault_write(
             "owner.md", data["owner_update"], "people",
             expected_revision=base.get("owner_rev") if base else None)))

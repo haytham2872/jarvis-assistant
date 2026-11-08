@@ -308,3 +308,8 @@ export type RecordView = { available: boolean; summary: RecordSummary; summary_g
   by_domain: { domain: string; n: number; brier: number; brier_gut: number }[];
   settled: RecordCall[]; open: RecordCall[]; void_count: number; withdrawn_count: number;
   early: boolean; threshold: number; text: string; caution: string; notes: string[] };
+
+// The portrait: how JARVIS sees the owner now, and the lines that faded out of it (dates are YYYY-MM-DD).
+export type PortraitEntry = { text: string; as_of: string | null };
+export type PortraitView = { migrated: boolean; sections: { title: string; entries: PortraitEntry[] }[];
+  faded: { faded_on: string; entries: PortraitEntry[] }[]; fading_days: number };

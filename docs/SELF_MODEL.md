@@ -32,6 +32,7 @@ What a tool keeps (the portfolio ledger, the schedule, standing rules, the calen
 in the tool, not in memory: consolidation does not copy it into notes, JARVIS reads the tool
 before saying what one holds, a reply saying the ledger is empty is checked against it, and
 recalled memory saying so is left out while it holds positions.
+The portrait of «owner» (people/owner.md) is changed at the end of a session by small dated edits, never rewritten: a Situation line nobody confirms for 45 days moves to a history file, and the morning brief asks once before one fades. Queue items are open, in progress, on hold (kept in mind, never raised unprompted) or resolved; the brief lists only open ones, each at most once a week.
 
 ### Active conversation engine
 
@@ -152,7 +153,7 @@ stops talking. Activity shows work with pause and resume, and goals with milesto
 starts, pauses, resumes or cancels them and reviews voice answers. Track record shows
 gut/corrected calibration, scores, open calls and source quotes; thin records say too early
 to tell. While you slept shows overnight work, quiet nights, failures and notes, remembering
-«his» last visit. Mind maps notes, positions and goal results with links, dates, filters and growth replay. The Action Button Shortcut
+«his» last visit. Mind maps notes, positions, goal results and the portrait (with its faded lines) with links, dates, filters and growth replay. The Action Button Shortcut
 speaks an answer saved in chat. Tabs keep the last view while refreshing. JARVIS cannot
 see or control the phone.
 

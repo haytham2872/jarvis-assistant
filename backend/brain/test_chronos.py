@@ -496,7 +496,7 @@ def test_compose_brief_quiet_morning_needs_no_llm(tmp_files, monkeypatch):
         return ""
     monkeypatch.setattr(chronos, "_collect_calendar", no_calendar)
     monkeypatch.setattr(chronos, "_collect_research_trail", lambda now: "")
-    monkeypatch.setattr(chronos, "_collect_open_intents", lambda: "")
+    monkeypatch.setattr(chronos, "_collect_open_intents", lambda now=None: [])
 
     text = asyncio.run(chronos.compose_brief())
     assert "Quiet night" in text
@@ -517,7 +517,7 @@ def test_compose_brief_falls_back_to_plain_digest_when_llm_fails(tmp_files, monk
         return ""
     monkeypatch.setattr(chronos, "_collect_calendar", no_calendar)
     monkeypatch.setattr(chronos, "_collect_research_trail", lambda now: "")
-    monkeypatch.setattr(chronos, "_collect_open_intents", lambda: "")
+    monkeypatch.setattr(chronos, "_collect_open_intents", lambda now=None: [])
 
     text = asyncio.run(chronos.compose_brief())
     assert "Found Y." in text   # degraded but not silent
@@ -528,7 +528,7 @@ def test_delivered_brief_now_marks_today_briefed(tmp_files, monkeypatch):
         return ""
     monkeypatch.setattr(chronos, "_collect_calendar", no_calendar)
     monkeypatch.setattr(chronos, "_collect_research_trail", lambda now: "")
-    monkeypatch.setattr(chronos, "_collect_open_intents", lambda: "")
+    monkeypatch.setattr(chronos, "_collect_open_intents", lambda now=None: [])
 
     async def delivered(_text):
         return True

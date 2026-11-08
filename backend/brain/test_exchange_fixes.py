@@ -221,7 +221,8 @@ def test_consolidation_does_not_copy_what_a_tool_keeps():
                                                     "threads_block", "facts_block", "listening_block",
                                                     "sleep_block", "positions_block", "predictions_block",
                                                     "people_block", "mood_register", "date_today",
-                                                    "tool_record_block")})
+                                                    "tool_record_block", "tool_facts",
+                                                    "portrait_field", "portrait_rules")})
 
 
 def test_last_sleep_says_whose_sleep_it_was(monkeypatch):

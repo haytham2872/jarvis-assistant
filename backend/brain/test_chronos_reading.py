@@ -71,7 +71,7 @@ def test_the_line_reaches_the_composed_brief(env, monkeypatch):
         return "Morning, prose."
     monkeypatch.setattr(chronos, "_collect_calendar", no_calendar)
     monkeypatch.setattr(chronos, "_collect_research_trail", lambda now: "")
-    monkeypatch.setattr(chronos, "_collect_open_intents", lambda: "")
+    monkeypatch.setattr(chronos, "_collect_open_intents", lambda now=None: [])
     monkeypatch.setattr(research, "_llm", prose)
     text = asyncio.run(chronos.compose_brief(local(2026, 11, 6), night_results=[]))
     assert "Research I stopped: Albert Camus" in text
@@ -95,7 +95,7 @@ def test_research_state_error_is_blank(env, monkeypatch):
 
 
 def _brief(monkeypatch, sent):
-    async def compose(now, night_results=None):
+    async def compose(now, night_results=None, intents=None):
         return "Morning.\n" + chronos._collect_reading_line(now)
 
     async def notifier(text):

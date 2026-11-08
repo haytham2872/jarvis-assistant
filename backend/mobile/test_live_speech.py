@@ -140,20 +140,158 @@ def test_the_held_sentence_and_what_follows_are_spoken_at_finish():
 
 # ------------------------------------------------------------------ the tool filler
 
-@pytest.mark.parametrize("user_text,tool,expected", [
-    ("what is on today", "web_browse", live_speech.FILLERS["web_browse"][0]),
-    ("qu'est-ce que j'ai demain, et pour le notaire", "web_browse", live_speech.FILLERS["web_browse"][1]),
-    ("what is on today", "some_unknown_tool", live_speech.DEFAULT_FILLER[0]),
+@pytest.mark.parametrize("user_text,tool,options,lang", [
+    ("what is on today", "web_browse", live_speech.FILLERS["web_browse"], 0),
+    ("qu'est-ce que j'ai demain, et pour le notaire", "web_browse", live_speech.FILLERS["web_browse"], 1),
+    ("what is on today", "some_unknown_tool", live_speech.DEFAULT_FILLERS, 0),
 ])
-def test_the_first_tool_call_with_nothing_said_gets_one_filler(user_text, tool, expected):
+def test_the_first_tool_call_with_nothing_said_gets_one_filler(user_text, tool, options, lang):
     ls, events = make(user_text)
 
     async def go():
         ls.on_event({"type": "tool_call", "tool": tool, "input": {}})
-        ls.on_event({"type": "tool_call", "tool": tool, "input": {}})      # never a second one
+        ls.on_event({"type": "tool_call", "tool": tool, "input": {}})      # not twice for one tool
     run(go())
     clips = clip_events(events)
-    assert [c["text"] for c in clips] == [expected]
+    assert len(clips) == 1 and clips[0]["text"] in [o[lang] for o in options]
+
+
+class Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+def timed(user_text="what is on today"):
+    clock, events = Clock(), []
+    ls = live_speech.LiveSpeech("req-0002", user_text, publish=events.append, now=clock)
+    ls._running = True          # as while run() consumes the turn
+    return ls, events, clock
+
+
+def texts(events):
+    return [c["text"] for c in clip_events(events)]
+
+
+def test_lines_vary_and_avoid_the_ones_said_lately():
+    live_speech._recent.clear()
+    said = [live_speech.pick(live_speech.STILL, "en") for _ in range(5)]
+    assert len(set(said)) == 5                       # five variants, none repeated
+    assert all(s in [o[0] for o in live_speech.STILL] for s in said)
+
+
+def test_a_quiet_start_with_no_tool_gets_a_thinking_line_once():
+    ls, events, clock = timed()
+
+    async def go():
+        clock.t = 1.0
+        ls.tick()
+        assert texts(events) == []                   # too early
+        clock.t = 3.0
+        ls.tick()
+        ls.tick()
+    run(go())
+    assert len(texts(events)) == 1 and texts(events)[0] in [o[0] for o in live_speech.THINKING]
+
+
+def test_a_long_silence_gets_a_still_working_line_and_three_lines_at_most():
+    ls, events, clock = timed()
+
+    async def go():
+        clock.t = 3.0
+        ls.tick()                                    # thinking
+        for step in (9.5, 17.0, 25.0, 33.0):
+            clock.t = step
+            ls.tick()
+    run(go())
+    said = texts(events)
+    assert len(said) == live_speech.MAX_FILLERS
+    assert all(s in [o[0] for o in live_speech.STILL] for s in said[1:])
+
+
+def test_no_line_while_he_is_talking_or_after_the_turn():
+    ls, events, clock = timed()
+
+    async def go():
+        clock.t = 0.5
+        ls._say("Here is the answer.")
+        clock.t = 6.0
+        ls.tick()                                    # 5.5 s since the last clip: fine
+        ls.finish(None, False)
+        clock.t = 20.0
+        ls.tick()
+    run(go())
+    assert texts(events) == ["Here is the answer."]
+
+
+def test_a_second_tool_gets_its_line_only_after_a_gap_of_silence():
+    ls, events, clock = timed()
+
+    async def go():
+        ls.on_event({"type": "tool_call", "tool": "calendar_action", "input": {}})
+        clock.t = 1.0
+        ls.on_event({"type": "tool_call", "tool": "gmail_action", "input": {}})    # too soon
+        clock.t = 5.0
+        ls.on_event({"type": "tool_call", "tool": "web_browse", "input": {}})
+    run(go())
+    said = texts(events)
+    assert len(said) == 2
+    assert said[1] in [o[0] for o in live_speech.FILLERS["web_browse"]]
+
+
+def test_one_tool_gets_one_line_a_turn_however_long_the_silence():
+    ls, events, clock = timed()
+
+    async def go():
+        ls.on_event({"type": "tool_call", "tool": "web_browse", "input": {}})
+        clock.t = 5.0
+        ls.on_event({"type": "tool_call", "tool": "web_browse", "input": {}})
+    run(go())
+    assert len(texts(events)) == 1
+
+
+def test_nothing_is_said_outside_a_running_turn():
+    clock, events = Clock(), []
+    ls = live_speech.LiveSpeech("req-0003", "hi", publish=events.append, now=clock)
+    clock.t = 30.0
+    run(asyncio.sleep(0))
+    ls.tick()
+    assert events == []
+
+
+def test_the_watch_task_ends_with_the_turn(monkeypatch):
+    monkeypatch.setattr(live_speech, "TICK_S", 0.01)
+    ls, _ = make()
+
+    async def go():
+        q = asyncio.Queue()
+        task = asyncio.create_task(ls.run(q))
+        await asyncio.sleep(0.03)
+        q.put_nowait(None)
+        await task
+        await asyncio.sleep(0.03)
+        return [t for t in asyncio.all_tasks() if t.get_name().startswith("live-speech-watch")]
+    assert run(go()) == []
+
+
+def test_the_watch_runs_only_while_the_turn_is_consumed(monkeypatch):
+    monkeypatch.setattr(live_speech, "TICK_S", 0.01)
+    monkeypatch.setattr(live_speech, "THINK_AFTER_S", 0.0)
+    ls, events = make()
+
+    async def go():
+        q = asyncio.Queue()
+        task = asyncio.create_task(ls.run(q))
+        await asyncio.sleep(0.05)
+        q.put_nowait(None)
+        await task
+        n = len(clip_events(events))
+        await asyncio.sleep(0.05)
+        return n
+    n = run(go())
+    assert n == 1 and len(clip_events(events)) == 1
 
 
 def test_no_filler_when_something_was_already_said():

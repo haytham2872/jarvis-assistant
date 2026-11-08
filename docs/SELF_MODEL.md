@@ -72,7 +72,8 @@ spoken version (no Markdown; every word the answer's own, a very long one read f
 Fenrir voice says it in clips, the French Fenrir for French. The phone plays them; the
 server plays nothing. Without Google's voice the iPhone's own reads.
 A turn «he» will hear is voiced sentence by sentence as JARVIS writes it; a sentence that
-claims something was saved, sent or set waits for the checked answer.
+claims something was saved, sent or set waits for the checked answer; short varied fixed
+lines cover a slow start, a tool call or a long silence.
 
 ### Active transcription
 

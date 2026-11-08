@@ -80,7 +80,7 @@ A ported change that should affect them is applied to them by hand.
 
 ## Watermark
 
-Last private commit reviewed: `8ea7467`
+Last private commit reviewed: `7fc0614`
 
 ## Log
 
@@ -89,6 +89,9 @@ since then is listed, newest first.
 
 | Private | What | Here |
 |---|---|---|
+| `7fc0614` | Code graph rebuilt with one worker, `.claude/` and docs kept out of it | not ported: the graph is rebuilt here, and the rest is private dev notes |
+| `8f0a773` | Voice mode: varied thinking lines (slow start, per tool, long silence) in English and French, the six said last avoided | ported (the lines are a language feature and carry no name) |
+| `d22e47d` | Voice mode: live hearing over WS /mobile/v1/voice/live (Silero), end of turn by Smart Turn v3.2, live speech clips, ONNX threads that never spin, spoken phone turns skip the planner | ported (Smart Turn downloads with `fetch_models.py --voice`; self-model sentences added to Active speech synthesis, transcription and desktop interface) |
 | `8ea7467` | Queue [hold] status and weekly-unique brief items, the tool-facts block in consolidation, the portrait edited by typed patches and fading, the phone's Portrait screen | ported (the portrait is `people/owner.md` with its history in `people/owner-history.md`; its sections are "Situation", "Who they are", "How to be with them" so they fit any owner) |
 | `b322329` | Discord supervisor, commands shared by Discord and the phone, /pause spares scheduled tasks, research v2 (note kinds, subject matching, rests and retirement, a daily budget, findings to the Inbox, thumbs feedback) | ported (the private server's measurements and incident dates are not copied) |
 | `d3a4b9a` | Implementer agent: move the worktree onto the working branch | not ported: private dev tooling |

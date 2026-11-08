@@ -332,3 +332,12 @@ describe('files (slice 7)', () => {
     expect(s.requests.r2).toMatchObject({ files, problems: ['p (q)'] });
   });
 });
+
+describe('command replies', () => {
+  it('shows a command and its reply as an answered message, kept across snapshots', () => {
+    let s = chatReducer(initialChat, { type: 'command', request_id: 'cmd-1', text: '/pace low', reply: 'Pace set to low', at: 5 });
+    expect(s.requests['cmd-1']).toMatchObject({ text: '/pace low', answer: 'Pace set to low', state: 'answered' });
+    s = chatReducer(s, { type: 'snapshot', snap: snap({}) });
+    expect(s.requests['cmd-1']?.answer).toBe('Pace set to low');
+  });
+});

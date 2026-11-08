@@ -153,7 +153,8 @@ def test_the_undo_command_is_wired_and_not_mistaken_for_running_a_skill():
     from backend import main
     from backend.brain import discord_bridge
     assert skills.forced("/skill undo weekly-email") == ("", "")
-    assert 'text.lower().startswith("/skill undo ")' in inspect.getsource(discord_bridge)
+    from backend.brain import commands
+    assert 'sub == "undo"' in inspect.getsource(commands)
     assert "skill_undo_handler  = skills.handle_undo_command" in inspect.getsource(main)
 
 

@@ -331,11 +331,11 @@ def started(monkeypatch):
     return calls
 
 
-def test_a_scheduled_run_during_a_pause_is_skipped_recorded_and_not_delayed(
+def test_a_scheduled_run_during_pause_all_is_skipped_recorded_and_not_delayed(
         files, dms, clock, started):
     clock["t"] = paris(2026, 9, 30, 15, 31)
     chronos._write_schedule([_task_line(paris(2026, 9, 30, 15, 30))])
-    pauses.start(pauses.WORK)
+    pauses.start(pauses.ALL)
     run(chronos._fire_due_tasks(clock["t"]))
 
     assert started == [], "a price 'at the open' is wrong an hour late: it is skipped, not delayed"
@@ -344,6 +344,29 @@ def test_a_scheduled_run_during_a_pause_is_skipped_recorded_and_not_delayed(
     rest = chronos._read_schedule()
     assert any("2026-10-01 15:30" in l for l in rest), "a daily task moves on to tomorrow"
     assert any("task skipped (paused)" in l for l in rest), "the trail says why it did not run"
+
+
+@pytest.mark.parametrize("skill", ["", "market-check"])
+def test_a_plain_pause_does_not_stop_a_scheduled_task(files, dms, clock, started, skill):
+    clock["t"] = paris(2026, 9, 30, 15, 31)
+    chronos._write_schedule([chronos._format_task_line(
+        paris(2026, 9, 30, 15, 30), "daily", "", "Europe/Paris", "NVDA research", skill)])
+    pauses.start(pauses.WORK)
+    run(chronos._fire_due_tasks(clock["t"]))
+    assert len(started) == 1, "/pause holds my own work, not what the owner scheduled"
+    assert pauses.skips(pauses.recent(1)[0]["id"]) == []
+
+
+def test_pause_all_lists_the_skipped_scheduled_task_for_resume(files, dms, clock, started):
+    clock["t"] = paris(2026, 9, 30, 15, 31)
+    chronos._write_schedule([_task_line(paris(2026, 9, 30, 15, 30))])
+    pauses.start(pauses.ALL)
+    run(chronos._fire_due_tasks(clock["t"]))
+    assert started == [] and [k for k, _ in skips()] == ["scheduled_task"]
+    pauses.end("resume")
+    assert "skipped scheduled check" in pause._stretch_text(pauses.recent(1)[0])
+
+
 
 
 def test_the_same_run_without_a_pause_starts(files, dms, clock, started):
@@ -364,7 +387,7 @@ def test_a_run_waiting_for_a_free_slot_is_skipped_if_a_pause_starts(files, dms, 
     run(chronos._fire_due_tasks(clock["t"]))
     assert len(chronos._load_state().get("due_task_runs", [])) == 1
 
-    pauses.start(pauses.WORK)
+    pauses.start(pauses.ALL)
     clock["t"] = paris(2026, 9, 30, 15, 32)
     run(chronos._fire_due_tasks(clock["t"]))
     assert len(chronos._load_state().get("due_task_runs", [])) == 0 and dms == []
@@ -599,13 +622,19 @@ def test_timed_night_and_research_tools_say_the_pause_holds_them(files, tmp_path
     pauses.start(pauses.WORK)
     replies = [
         run(chronos.schedule_night_task("research the ECB rate path for the morning brief")),
-        run(chronos.schedule_task("add", "2026-10-02 15:30",
-                                  "look up NVDA's live share price and report it with its source",
-                                  "once")),
         run(research.research_queue("add", "Albert Camus")),
     ]
     for reply in replies:
         assert "paused my own work" in reply and "/resume" in reply, reply
+
+
+def test_a_scheduled_task_is_only_noted_under_pause_all(files, clock):
+    task = "look up NVDA's live share price and report it with its source"
+    pauses.start(pauses.WORK)
+    assert "paused" not in run(chronos.schedule_task("add", "2026-10-02 15:30", task, "once")),         "a plain pause does not hold it"
+    pauses.start(pauses.ALL)
+    reply = run(chronos.schedule_task("add", "2026-10-03 15:30", task, "once"))
+    assert "paused everything I do on my own" in reply and "/resume" in reply
 
 
 def test_a_watch_says_the_pause_holds_it(monkeypatch):
@@ -686,3 +715,54 @@ def test_a_finished_profile_fill_still_reports(monkeypatch):
     monkeypatch.setattr(R, "fill", done)
     run(R._run("marcus", "Marcus Aurelius"))
     assert sent == ["Researched Marcus Aurelius: 12 new entries with sources."]
+
+
+# The first version of this fix changed only chronos, and its test stubbed
+# start_scheduled -- so under a plain /pause the real background._start still refused the
+# run. These go through the real admission, the queue and the per-step stop.
+
+def test_the_real_admission_takes_a_scheduled_run_under_a_plain_pause(jobs, monkeypatch):
+    async def worker(t):
+        return None
+    monkeypatch.setattr(background, "_worker", worker)
+    pauses.start(pauses.WORK)
+    task, error = run(background._start("report NVDA's close", "b", kind="scheduled"))
+    assert error == "" and task is not None
+    task, error = run(background._start("look into the ECB", "b"))
+    assert task is None and "/pause" in error            # ordinary jobs stay held
+
+
+def test_pause_all_holds_the_scheduled_run_at_admission(jobs):
+    pauses.start(pauses.ALL)
+    task, error = run(background._start("report NVDA's close", "b", kind="scheduled"))
+    assert task is None and "/pause" in error
+
+
+def test_a_running_scheduled_job_is_not_stopped_by_a_plain_pause(monkeypatch):
+    pauses.start(pauses.WORK)
+    token = background._job_kind.set("scheduled")
+    try:
+        background._stop_if_paused()                      # does not raise
+    finally:
+        background._job_kind.reset(token)
+    with pytest.raises(pause.Paused):
+        background._stop_if_paused()                      # an ordinary job does stop
+
+
+def test_the_queue_starts_a_scheduled_run_but_holds_others_under_a_plain_pause(jobs, monkeypatch):
+    started = []
+
+    async def worker(t):
+        started.append(t.id)
+    monkeypatch.setattr(background, "_worker", worker)
+    background._tasks[1] = background.BgTask(id=1, description="ECB deep dive", status="queued")
+    background._tasks[2] = background.BgTask(id=2, description="NVDA close", status="queued",
+                                             kind="scheduled")
+    pauses.start(pauses.WORK)
+
+    async def go():
+        background._schedule_queued()
+        await asyncio.sleep(0)
+    run(go())
+    assert started == [2]
+    assert background._tasks[1].status == "queued"

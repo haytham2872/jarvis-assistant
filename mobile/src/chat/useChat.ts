@@ -274,5 +274,10 @@ export function useChat(cfg: ServerConfig | null, options: ChatOptions = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  return { state, send, sendRecording, sendVoiceTurn, warmUp, retry, startNewChat, refresh, decide, stop };
+  /** A slash command's reply, shown in the conversation as JARVIS's message. */
+  const showCommand = useCallback((text: string, reply: string) => {
+    dispatch({ type: 'command', request_id: newRequestId(), text, reply, at: Date.now() });
+  }, []);
+
+  return { state, send, sendRecording, sendVoiceTurn, warmUp, retry, startNewChat, refresh, decide, stop, showCommand };
 }

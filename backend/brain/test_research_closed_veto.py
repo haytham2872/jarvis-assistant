@@ -169,6 +169,8 @@ def test_a_real_veto_researches_the_next_open_candidate_instead(monkeypatch, top
 
 
 def test_a_veto_with_nothing_else_due_skips_once(monkeypatch, topics):
+    # No note due, but recent conversation: the picker still runs (a fresh subject can come
+    # from conversation) and the closed-topic veto still applies to what it proposes.
     note(topics, MUSE, "Meta's Muse Model", closed=True)
     pick = dict(PICK, subject="Meta Muse model benchmarks")
     t = Tick(monkeypatch, topics, pick, {MUSE: 0.95}, [])
@@ -186,3 +188,12 @@ def test_with_nothing_closed_the_picker_prompt_says_none(monkeypatch, topics):
     t = Tick(monkeypatch, topics, PICK, {}, [candidate("albert-camus.md", "Albert Camus")])
     assert "closed to research -- never propose these, or a new note about them:\n(none)" \
         in t.prompts[0]
+
+
+@pytest.fixture(autouse=True)
+def _every_note_is_world(monkeypatch):
+    """These tests are about scoring, cooldowns and vetoes, not kinds (see test_research_v2.py)."""
+    async def world(*a, **k):
+        return "world"
+    monkeypatch.setattr(research, "_known_kind", lambda *a, **k: "world")
+    monkeypatch.setattr(research, "kind_of", world)

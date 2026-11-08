@@ -100,6 +100,7 @@ import time
 import asyncio
 import logging
 import datetime
+import hashlib
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -218,6 +219,42 @@ def _dm_hold_reason(now: float, last_notify: float) -> str:
     if now - last_notify < _MIN_NOTIFY_GAP_S:
         return "min gap"
     return ""
+
+
+_DIGEST_KEY = "research_digest"
+_DIGEST_KEEP = 30
+
+
+def _file_finding(subject: str, message: str, now: float) -> bool:
+    """File a finding in the app Inbox and in the brief's digest instead of DMing it.
+    False when storage failed (the caller then falls back to the DM)."""
+    try:
+        from backend.storage import notices
+        if notices.record("research", message, key=f"research:{subject}@{int(now)}") is None:
+            return False
+
+        def add(st: dict) -> None:
+            st[_DIGEST_KEY] = (list(st.get(_DIGEST_KEY) or [])
+                               + [{"subject": subject, "message": message, "ts": now}])[-_DIGEST_KEEP:]
+        _update_state(add)
+        return True
+    except Exception as e:
+        log.warning("research: could not file finding %r: %s", subject, e)
+        return False
+
+
+def digest_line(now: float) -> str:
+    """Morning-brief line over the findings filed in the last 24h ("" when none)."""
+    items = [d for d in (_load_state().get(_DIGEST_KEY) or []) if now - float(d.get("ts", 0)) < 86400.0]
+    if not items:
+        return ""
+    parts = []
+    for d in reversed(items[-4:]):
+        first = re.split(r"(?<=[.!?])\s|\n", str(d.get("message", "")).strip(), maxsplit=1)[0]
+        parts.append(f"{d.get('subject', '?')} — {first[:160]}")
+    more = f" (and {len(items) - 4} more)" if len(items) > 4 else ""
+    return ("What I looked into: " + "; ".join(parts) + more
+            + " — each is in your Inbox; 👍/👎 tells me what to keep looking into.")
 
 
 def _defer_notification(subject: str, message: str) -> None:
@@ -882,7 +919,7 @@ def _log_research_pass(subject: str, angle: str, outcome: str, queued: bool = Fa
     """
     try:
         lines = _read_queue_file() or list(_QUEUE_HEADER)
-        stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        stamp = datetime.datetime.now(_localtime.ZONE).strftime("%Y-%m-%d %H:%M")
         origin = "queued" if queued else "auto"
         lines.append(f"[done] {stamp} | {subject} [{angle}] ({origin}) | {outcome}")
         _write_queue_file(lines)
@@ -1063,14 +1100,23 @@ async def research_queue(action: str, subject: str = "", angle: str = "", reason
                 closed_files = []
             if closed_files:
                 out.append(f"Closed to research: {', '.join(closed_files)}")
+            retired = _load_state().get(_RETIRED_KEY) or []
+            if retired:
+                out.append("Retired after repeated failures (queue or reopen one to lift it):")
+                out.extend(f"  {r.get('subject', '')} (since {r.get('since', '?')}; last: {r.get('last_outcome', '')})"
+                           for r in retired)
             return "\n".join(out)
 
         if action in ("close", "reopen"):
             subject = (subject or "").strip()
             if len(subject.strip(".")) < 3:
                 return "Error: a real subject is required."
+            lifted = await _lift_retirement(subject) if action == "reopen" else []
+            lifted_note = f" Lifted the retirement of: {', '.join(lifted)}." if lifted else ""
             files = _find_family_files(subject)
             if not files:
+                if lifted:
+                    return f"No topic note found matching '{subject}'.{lifted_note}"
                 return f"No topic note found matching '{subject}' — nothing to {action}."
             # Written directly (not via vault_write) -- this only flips a
             # frontmatter flag, the note's actual content is untouched, so
@@ -1093,7 +1139,7 @@ async def research_queue(action: str, subject: str = "", angle: str = "", reason
                     continue
                 updated_files.append(fname)
             verb = "Closed" if action == "close" else "Reopened"
-            return f"{verb} {len(updated_files)} note(s) {'to' if action == 'close' else 'for'} autonomous research: {', '.join(updated_files)}."
+            return f"{verb} {len(updated_files)} note(s) {'to' if action == 'close' else 'for'} autonomous research: {', '.join(updated_files)}.{lifted_note}"
 
         if action != "add":
             return f"Error: unknown action '{action}'. Use 'add', 'status', 'close', or 'reopen'."
@@ -1112,6 +1158,7 @@ async def research_queue(action: str, subject: str = "", angle: str = "", reason
             return f"'{subject}' is already in the research queue."
         if len(existing_queued) >= _MAX_QUEUED:
             return f"Error: the research queue already has {_MAX_QUEUED} pending items — let some complete first."
+        await _lift_retirement(subject)   # a deliberate request lifts a retirement
         today = datetime.date.today().isoformat()
         lines.append(_format_queued_line(subject, angle, (reason or "").strip(), today))
         _write_queue_file(lines)
@@ -1256,6 +1303,314 @@ def _note_created_ts(content: str) -> float:
     return 0.0
 
 
+# ---------------------------------------------------------------------------
+# Kinds, subject history by meaning, daily budget
+# ---------------------------------------------------------------------------
+#
+# Measured on the server (last 60 passes, one every ~4h for 10 days): 47% went to notes
+# about the owner's own life/writing or JARVIS's analyses of its letters, 20% to notes about
+# JARVIS itself (58% of those failed), only a third to subjects the web can add to. The
+# subject variants of one theme ("Letter Corpus Analysis: Method..." / "...per-phase...")
+# each became their own file/family, so _FAMILY_WEEKLY_CAP never bit: ~20 subjects got 60
+# passes. So: (1) only "world" notes are researched on their own; (2) a subject's past
+# passes are counted by meaning; (3) a daily budget caps autonomous passes.
+
+# Variants of one subject score 0.89-0.99 cosine against each other (gte-small, the shared
+# embedder); distinct subjects score <= 0.84 (measured on the same 60 passes).
+_SAME_SUBJECT_SIM = 0.88
+_SUBJECT_HISTORY_DAYS = 30.0
+_SUBJECT_WEEKLY_CAP = 2          # passes per subject per 7 days (queued ones count)
+_REST_LADDER_DAYS = (2.0, 4.0, 8.0, 16.0, 30.0)   # rest after 1, 2, 3, 4, 5+ "nothing new" in a row
+_RETIRE_AFTER_FAILS = 3          # "failed: ..." outcomes in a row
+_RETIRED_KEY = "research_retired"
+_VOTE_DAYS = 90.0                # the owner's 👍/👎 on findings that still count
+_VOTE_REST_DAYS = 30.0           # one 👎 rests the subject this long
+_VOTE_LIKE_DAYS = 14.0           # a 👍 moves the subject to the front for this long
+_LIFTS_KEY = "research_retired_lifts"
+_KINDS_KEY = "research_kinds"
+_KIND_VALUES = ("world", "personal", "self")
+_MAX_CLASSIFY_PER_TICK = 6
+_KIND_MAX_TOKENS = 300
+# Autonomous passes per local day by pace; queued requests are outside it.
+_DAILY_PASSES = {"low": 1, "normal": 2, "high": 4}
+
+_KIND_PROMPT = _owner.say("""\
+Classify this note title and excerpt into exactly one kind. Answer with one word: world, personal or self.
+
+world = a subject outside «owner»'s own life and outside JARVIS itself that public sources (news, papers, reference works) can add to: a person, idea, work, event, company, technology, place.
+personal = about «owner»'s own life, plans, work, studies, health, relationships, tastes or something he made, or JARVIS's own letters, reflections or analyses of their conversations.
+self = about how JARVIS itself is built or runs (its models, routing, memory, research loop, tools, scheduling).
+
+Title: {title}
+Excerpt: {head}
+
+Answer with one word:""")
+
+
+def _norm_subject(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _frontmatter_kind(text: str) -> Optional[str]:
+    """`research_kind:` frontmatter override (the owner's word beats any classifier)."""
+    if not text:
+        return None
+    try:
+        from backend.brain.semindex import _frontmatter_fields
+        raw = _frontmatter_fields(text, ("research_kind",)).get("research_kind", "")
+    except Exception:
+        return None
+    raw = raw.strip().strip("\"'").lower()
+    return raw if raw in _KIND_VALUES else None
+
+
+def _kind_hash(title: str, head: str) -> str:
+    return hashlib.sha256((title + head).encode("utf-8")).hexdigest()
+
+
+def _known_kind(filename: str, title: str, head: str, content: str = "") -> Optional[str]:
+    """Kind without a model call: frontmatter override, else a cached answer whose hash
+    still matches the note. None = needs classifying."""
+    override = _frontmatter_kind(content or head)
+    if override:
+        return override
+    rec = (_load_state().get(_KINDS_KEY) or {}).get(filename) if filename else None
+    if rec and rec.get("hash") == _kind_hash(title, head) and rec.get("kind") in _KIND_VALUES:
+        return rec["kind"]
+    return None
+
+
+async def kind_of(filename: str, title: str, head: str, content: str = "") -> Optional[str]:
+    """"world" | "personal" | "self" | None. Frontmatter, then cache, then one cheap-model
+    call (cached under filename). Any other answer or a failed call is None, not cached."""
+    known = _known_kind(filename, title, head, content)
+    if known:
+        return known
+    try:
+        with _llm_calls.labelled("research.kind"):
+            raw = await _llm(_KIND_PROMPT.format(title=title[:200], head=head[:_TOPIC_HEAD_CHARS]),
+                             _KIND_MAX_TOKENS)
+    except Exception as e:
+        log.debug("research: kind call failed for %r: %s", title, e)
+        return None
+    kind = str(raw or "").strip().strip(".!\"'` *").lower()
+    if kind not in _KIND_VALUES:
+        log.debug("research: unusable kind answer for %r: %r", title, str(raw)[:80])
+        return None
+    if filename:
+        digest = _kind_hash(title, head)
+
+        def mutate(state: dict) -> None:
+            state.setdefault(_KINDS_KEY, {})[filename] = {"kind": kind, "hash": digest}
+        try:
+            _update_state(mutate)
+        except Exception as e:
+            log.debug("research: kind cache skipped: %s", e)
+    return kind
+
+
+_DONE_SUBJECT_RE = re.compile(r"^(?P<s>.*?)(?: \[(?P<a>[a-z]+)\])?(?: \((?P<o>queued|auto)\))?$")
+
+
+def _outcome_class(outcome: str) -> str:
+    """wrote | nothing | failed | skip. Skips (closed-topic veto, concurrent write, cut-off)
+    are not about the subject's value and count as none of the others."""
+    if outcome.startswith("wrote"):
+        return "wrote"
+    if outcome.startswith("no new understanding"):
+        return "nothing"
+    if outcome.startswith("failed"):
+        return "failed"
+    return "skip"
+
+
+def parse_done_lines(lines: list[str], now: float, days: float = _SUBJECT_HISTORY_DAYS) -> list[dict]:
+    """[done] trail lines of the last `days` days, oldest first:
+    [{ts, subject, angle, origin, outcome, cls}]. Stamps are in the owner's time zone."""
+    out = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("[done]"):
+            continue
+        head, _, rest = stripped[len("[done]"):].partition("|")
+        subject_part, _, outcome = rest.partition("|")
+        try:
+            ts = datetime.datetime.strptime(head.strip(), "%Y-%m-%d %H:%M").replace(tzinfo=_localtime.ZONE).timestamp()
+        except ValueError:
+            continue
+        if now - ts > days * 86400.0:
+            continue
+        m = _DONE_SUBJECT_RE.match(subject_part.strip())
+        outcome = outcome.strip()
+        out.append({"ts": ts, "subject": (m.group("s") if m else subject_part).strip(),
+                    "angle": (m.group("a") if m else None), "origin": (m.group("o") if m else None) or "auto",
+                    "outcome": outcome, "cls": _outcome_class(outcome)})
+    return out
+
+
+def autonomous_passes_today(passes: list[dict], now: float) -> int:
+    """Autonomous passes that ran on `now`'s local day (skips do not use the budget)."""
+    day = datetime.datetime.fromtimestamp(now, _localtime.ZONE).date()
+    return sum(1 for p in passes
+               if p["origin"] == "auto" and p["cls"] != "skip"
+               and datetime.datetime.fromtimestamp(p["ts"], _localtime.ZONE).date() == day)
+
+
+def daily_budget(pace: str) -> int:
+    return _DAILY_PASSES.get(pace, _DAILY_PASSES[_DEFAULT_PACE])
+
+
+class _History:
+    """The last 30 days of passes, retirements and lifts, with subjects compared by meaning.
+    `vecs` maps subject text -> embedding; without a vector two subjects match only when
+    their normalized strings are equal."""
+
+    def __init__(self, passes: list[dict], retired: list[dict], lifts: list[dict],
+                 votes: Optional[list[dict]] = None):
+        self.passes, self.retired, self.lifts = passes, retired, lifts
+        self.votes = votes or []   # the owner's 👍/👎 on findings, last 90 days
+        self.vecs: dict[str, list[float]] = {}
+
+    @classmethod
+    def load(cls, now: float) -> "_History":
+        state = _load_state()
+        try:
+            from backend.storage import research_feedback
+            votes = research_feedback.votes(now - _VOTE_DAYS * 86400.0)
+        except Exception as e:
+            log.debug("research: votes unavailable: %s", e)
+            votes = []
+        return cls(parse_done_lines(_read_queue_file(), now),
+                   list(state.get(_RETIRED_KEY) or []), list(state.get(_LIFTS_KEY) or []), votes)
+
+    def texts(self) -> list[str]:
+        subjects = [p["subject"] for p in self.passes] + [r.get("subject", "") for r in self.retired]
+        subjects += [l.get("subject", "") for l in self.lifts] + [v.get("subject", "") for v in self.votes]
+        return list(dict.fromkeys(t for t in subjects if t))
+
+    async def ensure(self, texts: list[str]) -> None:
+        """Embed whichever of `texts` has no vector yet (one batched call, best effort)."""
+        missing = list(dict.fromkeys(t for t in texts if t and t not in self.vecs))
+        if not missing:
+            return
+        try:
+            from backend.brain import embeddings
+            vecs = await embeddings.embed_many(missing)
+            if vecs and len(vecs) == len(missing):
+                self.vecs.update(zip(missing, vecs))
+        except Exception as e:
+            log.debug("research: subject embedding unavailable (%s) -- exact-string history", e)
+
+    def same(self, a: str, b: str) -> bool:
+        if _norm_subject(a) == _norm_subject(b):
+            return True
+        va, vb = self.vecs.get(a), self.vecs.get(b)
+        return bool(va and vb and _cosine(va, vb) >= _SAME_SUBJECT_SIM)
+
+    def _votes_on(self, subject: str) -> list[dict]:
+        return [v for v in self.votes if self.same(subject, v.get("subject", ""))]
+
+    def liked(self, subject: str, now: float) -> bool:
+        """A 👍 in the last _VOTE_LIKE_DAYS days with no 👎 after it."""
+        mine = self._votes_on(subject)
+        ups = [v["ts"] for v in mine if v["vote"] == "up" and now - v["ts"] < _VOTE_LIKE_DAYS * 86400.0]
+        return bool(ups) and not any(v["vote"] == "down" and v["ts"] > max(ups) for v in mine)
+
+    def gate(self, subject: str, now: float) -> tuple[str, str]:
+        """(verdict, detail): ok | retired | retire | rested | capped. "retire" = this
+        subject has just reached the failure limit (the caller records it)."""
+        if any(self.same(subject, r.get("subject", "")) for r in self.retired):
+            return "retired", ""
+        # The owner's thumbs-down: two in 90 days retire the subject, one in 30 days rests it.
+        # A lift (research_queue add/reopen) cancels the 👎 given before it.
+        downs = [v["ts"] for v in self._votes_on(subject) if v["vote"] == "down"
+                 and not any(v["ts"] <= float(l.get("at", 0.0)) and self.same(subject, l.get("subject", ""))
+                             for l in self.lifts)]
+        if len(downs) >= 2:
+            return "retire", "two 👎 votes"
+        if any(now - t < _VOTE_REST_DAYS * 86400.0 for t in downs):
+            return "rested", "marked not useful"
+        mine = [p for p in self.passes if self.same(subject, p["subject"])]
+        # Failures before a lift (research_queue add/reopen) stop counting.
+        counted = [p for p in mine
+                   if not any(p["ts"] <= float(l.get("at", 0.0)) and self.same(p["subject"], l.get("subject", ""))
+                              for l in self.lifts)]
+        streak, last_fail = 0, ""
+        for p in reversed(counted):
+            if p["cls"] == "failed":
+                streak += 1
+                last_fail = last_fail or p["outcome"]
+            elif p["cls"] in ("wrote", "nothing"):
+                break
+        if streak >= _RETIRE_AFTER_FAILS:
+            return "retire", last_fail
+        nothing, last_ts = 0, 0.0
+        for p in reversed(mine):
+            if p["cls"] == "nothing":
+                nothing += 1
+                last_ts = last_ts or p["ts"]
+            elif p["cls"] == "wrote":
+                break
+        if nothing:
+            rest = _REST_LADDER_DAYS[min(nothing, len(_REST_LADDER_DAYS)) - 1] * 86400.0
+            if now - last_ts < rest:
+                return "rested", f"{nothing} in a row"
+        week = sum(1 for p in mine if p["cls"] != "skip" and now - p["ts"] < _FAMILY_WEEKLY_WINDOW_DAYS * 86400.0)
+        if week >= _SUBJECT_WEEKLY_CAP:
+            return "capped", f"{week} in 7 days"
+        return "ok", ""
+
+    def retire(self, subject: str, last_outcome: str) -> None:
+        """Remember the retirement here and in the state file (once per subject)."""
+        entry = {"subject": subject, "since": datetime.datetime.now(_localtime.ZONE).date().isoformat(),
+                 "last_outcome": last_outcome[:120]}
+        if any(self.same(subject, r.get("subject", "")) for r in self.retired):
+            return
+        self.retired.append(entry)
+
+        def mutate(state: dict) -> None:
+            lst = state.setdefault(_RETIRED_KEY, [])
+            if not any(_norm_subject(r.get("subject", "")) == _norm_subject(subject) for r in lst):
+                lst.append(entry)
+        try:
+            _update_state(mutate)
+        except Exception as e:
+            log.debug("research: retirement not saved: %s", e)
+        log.warning("research: %r retired from autonomous research (%s)", subject, last_outcome[:80])
+
+
+async def _new_subject_problem(subject: str, why: str, hist: _History, now: float) -> str:
+    """Why a picker-proposed new subject may not be researched ('' = fine)."""
+    kind = await kind_of("", subject, why)
+    if kind != "world":
+        return f"kind: {kind or 'unclassified'}"
+    await hist.ensure(hist.texts() + [subject])
+    verdict, detail = hist.gate(subject, now)
+    if verdict == "retire":
+        hist.retire(subject, detail)
+    return "" if verdict == "ok" else f"{verdict} {detail}".strip()
+
+
+async def _lift_retirement(subject: str) -> list[str]:
+    """research_queue add/reopen on a retired subject (cosine >= _SAME_SUBJECT_SIM): drop the
+    retirement and record the lift so the earlier failures stop counting."""
+    retired = list(_load_state().get(_RETIRED_KEY) or [])
+    if not retired:
+        return []
+    hist = _History([], retired, [])
+    await hist.ensure([subject] + [r.get("subject", "") for r in retired])
+    lifted = [r.get("subject", "") for r in retired if hist.same(subject, r.get("subject", ""))]
+    if not lifted:
+        return []
+    at = time.time()
+
+    def mutate(state: dict) -> None:
+        state[_RETIRED_KEY] = [r for r in state.get(_RETIRED_KEY, []) if r.get("subject", "") not in lifted]
+        state[_LIFTS_KEY] = (state.get(_LIFTS_KEY, []) + [{"subject": s, "at": at} for s in lifted])[-50:]
+    _update_state(mutate)
+    return lifted
+
+
 async def _gather_candidates(now: float) -> list[dict]:
     """Score every topics/ note not in cooldown, grouped into subject families.
 
@@ -1308,6 +1663,8 @@ async def _gather_candidates(now: float) -> list[dict]:
             "last_angle": _parse_last_angle(content),
             "closed":     closed,
             "digest":     " ".join(body[:_TOPIC_HEAD_CHARS].split()),
+            "head":       body[:_TOPIC_HEAD_CHARS],
+            "content":    content,
             "open_question": _first_open_question(body),
             "freshness":  0.0,   # filled below for open files only
         }
@@ -1318,13 +1675,20 @@ async def _gather_candidates(now: float) -> list[dict]:
     # the per-file freshness lookup below (semindex.search's query_vec skips
     # re-embedding) — same vector-reuse pattern as chat()'s intent embedding,
     # applied here to avoid N separate embeds for N topic notes every tick.
+    # The same batch carries the past-pass subjects and the open notes' titles, so the
+    # subject history is compared by meaning at no extra embedding call.
     vectors: dict[str, list[float]] = {}
-    if query_texts:
+    hist = _History.load(now)
+    extra = list(dict.fromkeys(hist.texts() + [i["title"] for i in by_file.values() if not i["closed"]]))
+    names = list(query_texts.keys())
+    batch = [query_texts[n] for n in names] + extra
+    if batch:
         try:
             from backend.brain import embeddings
-            names = list(query_texts.keys())
-            vecs = await embeddings.embed_many([query_texts[n] for n in names])
-            vectors = dict(zip(names, vecs))
+            vecs = await embeddings.embed_many(batch)
+            if vecs and len(vecs) == len(batch):
+                vectors = dict(zip(names, vecs[:len(names)]))
+                hist.vecs.update(zip(extra, vecs[len(names):]))
         except Exception as e:
             log.debug("research: family embedding batch failed: %s", e)
 
@@ -1347,6 +1711,7 @@ async def _gather_candidates(now: float) -> list[dict]:
     failures = _load_state().get(_FAILURES_KEY, {})
     candidates: list[dict] = []
     stopped: list[dict] = []
+    classify_budget = _MAX_CLASSIFY_PER_TICK
     for member_files in families:
         open_members = [by_file[f] for f in member_files if not by_file[f]["closed"]]
         if not open_members:
@@ -1356,6 +1721,26 @@ async def _gather_candidates(now: float) -> list[dict]:
         if any(in_failure_hold(failures.get(m["file"]), now) for m in open_members):
             continue   # failing repeatedly: held back, see _FAIL_HOLD_S
         cand = _aggregate_family(open_members)
+        # Subject history by meaning: variants of one subject share their passes.
+        verdict, detail = hist.gate(cand["title"], now)
+        if verdict == "retire":
+            hist.retire(cand["title"], detail)
+        if verdict != "ok":
+            log.debug("research: %r excluded (%s %s)", cand["title"], verdict, detail)
+            continue
+        # Only subjects the web can add to are researched on their own. Unknown (a failed
+        # call, or past this tick's classification budget) skips the family this tick.
+        kinds_ok = True
+        for m in open_members:
+            kind = _known_kind(m["file"], m["title"], m["head"], m["content"])
+            if kind is None and classify_budget > 0:
+                classify_budget -= 1
+                kind = await kind_of(m["file"], m["title"], m["head"], m["content"])
+            if kind != "world":
+                kinds_ok = False
+                break
+        if not kinds_ok:
+            continue
         if reading(cand["days_unread"]) == 0.0 and cand["score"] < _MIN_SCORE_TO_ATTEMPT:
             stopped.append({"file": cand["file"], "title": cand["title"],
                             "last_opened": cand["last_opened"], "since": cand["since"]})
@@ -1364,6 +1749,7 @@ async def _gather_candidates(now: float) -> list[dict]:
 
     _update_state(lambda st: st.__setitem__("stopped_topics", stopped))
     candidates.sort(key=lambda c: c["score"], reverse=True)
+    candidates.sort(key=lambda c: not hist.liked(c["title"], now))   # 👍'd subjects first (stable)
     return candidates
 
 
@@ -1771,12 +2157,22 @@ async def _tick() -> None:
         log.info("research: queued request %r angle=%s file=%s queries=%s",
                  subject, angle, existing_file, queries)
     else:
+        # Daily budget (local day), counted from the trail. Queued requests are above.
+        hist = _History.load(now)
+        pace = get_pace()
+        used = autonomous_passes_today(hist.passes, now)
+        if used >= daily_budget(pace):
+            log.info("research: daily budget spent (%d of %d autonomous passes today, pace %s) — skipping",
+                     used, daily_budget(pace), pace)
+            return
         candidates, recent = await asyncio.gather(
             _gather_candidates(now),
             _recent_exchange_lines(now),
         )
+        # With no note due, recent conversation can still give a fresh world subject; the
+        # picker proposes it and _new_subject_problem holds it to the same rules below.
         if not candidates and not recent:
-            log.debug("research: nothing to work with (no topics, no recent exchanges) — skipping")
+            log.info("research: no world subject due (kind, subject history or cooldown) — skipping tick")
             return
 
         best_score = candidates[0]["score"] if candidates else 0.0
@@ -1832,6 +2228,19 @@ async def _tick() -> None:
         if not queries:
             log.warning("research: no usable queries — skipping tick")
             return
+
+        # A subject the picker proposes fresh (no existing note) is held to the same rules
+        # as an existing one: a world subject, and not a variant of one that is retired,
+        # resting or capped. Otherwise the next candidate takes the pass.
+        if existing_file is None:
+            problem = await _new_subject_problem(subject, str(pick.get("why", "")), hist, now)
+            if problem:
+                log.info("research: rejecting proposed subject %r (%s)", subject, problem)
+                pick = fallback_pick(candidates)
+                if pick is None:
+                    log.info("research: no other world subject due — skipping tick")
+                    return
+                subject, existing_file, queries = pick["subject"], pick["existing_file"], pick["queries"]
 
         # An unknown/missing angle from the picker isn't worth rejecting the whole
         # pick over — coerce it to the deterministic rotation for that note.
@@ -2057,7 +2466,7 @@ async def _tick() -> None:
     outcome = f"wrote topics/{filename} — {why}"
 
     # --- Maybe notify (model judgment + hard spam guard) ---
-    if synth.get("notify") and synth.get("message") and _notifier is not None:
+    if synth.get("notify") and synth.get("message"):
         message = str(synth["message"]).strip()
         sources = _message_sources(synth, findings)
         if not sources:
@@ -2067,41 +2476,42 @@ async def _tick() -> None:
                                file=existing_file or f"{_slugify(subject)}.md")
             return
         message += "\n\nSources: " + " ".join(sources)
-        state = _load_state()
-        last_notify = float(state.get("last_notify", 0.0))
-        hold = _dm_hold_reason(now, last_notify)
-        if not hold:
-            # Piggyback any parked findings onto this DM — one message, no
-            # extra gap consumed, nothing lost.
-            pending = state.get("deferred_notifies", [])
-            if pending:
-                held = "\n".join(f"- {str(p.get('message', '')).strip()}"
-                                 for p in pending
-                                 if _sourced_notification(str(p.get("message", ""))))
-                if held:
-                    message += "\n\nAlso, from earlier passes:\n" + held
-            sent_count = len(pending)
-            sent = False
-            try:
-                sent = await _notifier(message)
-            except Exception as e:
-                log.debug("research: notify failed: %s", e)
-            if sent:
-                # A04 slice 4: apply only this pass's delta to FRESH state. The old code
-                # wrote back a dict read before the DM, clobbering anything written
-                # meanwhile -- `/pace` from Discord writes this same file, and a tick can
-                # run for minutes. It also cleared deferred_notifies wholesale, which
-                # would discard a finding deferred *during* the DM; only the entries
-                # actually piggybacked onto this message are dropped now.
-                def _mark_sent(st, _n=sent_count):
-                    st["deferred_notifies"] = list(st.get("deferred_notifies", []))[_n:]
-                    st["last_notify"] = now
-                _update_state(_mark_sent)
-                log.info("research: notified the owner about %r", subject)
-                outcome += " (DM sent)"
-        else:
-            _defer_notification(subject, message)
-            outcome += f" (DM held: {hold})"
+        if _file_finding(subject, message, now):
+            outcome += " (filed to Inbox)"
+        elif _notifier is not None:
+            # Storage failed: a finding is never silently lost, so it goes the old way.
+            state = _load_state()
+            last_notify = float(state.get("last_notify", 0.0))
+            hold = _dm_hold_reason(now, last_notify)
+            if not hold:
+                # Piggyback any parked findings onto this DM — one message, no
+                # extra gap consumed, nothing lost.
+                pending = state.get("deferred_notifies", [])
+                if pending:
+                    held = "\n".join(f"- {str(p.get('message', '')).strip()}"
+                                     for p in pending
+                                     if _sourced_notification(str(p.get("message", ""))))
+                    if held:
+                        message += "\n\nAlso, from earlier passes:\n" + held
+                sent_count = len(pending)
+                sent = False
+                try:
+                    sent = await _notifier(message)
+                except Exception as e:
+                    log.debug("research: notify failed: %s", e)
+                if sent:
+                    # A04 slice 4: apply only this pass's delta to FRESH state (`/pace`
+                    # writes this same file); only the entries piggybacked onto this
+                    # message are dropped from deferred_notifies.
+                    def _mark_sent(st, _n=sent_count):
+                        st["deferred_notifies"] = list(st.get("deferred_notifies", []))[_n:]
+                        st["last_notify"] = now
+                    _update_state(_mark_sent)
+                    log.info("research: notified the owner about %r", subject)
+                    outcome += " (DM sent)"
+            else:
+                _defer_notification(subject, message)
+                outcome += f" (DM held: {hold})"
 
     _log_research_pass(subject, angle, outcome, queued=from_queue,
                                file=existing_file or f"{_slugify(subject)}.md")

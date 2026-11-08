@@ -7,15 +7,15 @@ to stop the server. This is the switch.
 
 **What a pause holds** (`work`, the default):
   * the paced loops: research, rumination, watches, forecast checks;
-  * scheduled tasks (a run whose moment passes is *skipped and listed on resume*: a price
-    "at the open" delivered an hour late is wrong, so it is not delayed) and night tasks
-    (kept, and run in the next quiet window);
+  * night tasks (kept, and run in the next quiet window);
   * new background jobs (`run_in_background`, `web_research`, `continue_in_background`,
     profile research) are refused; running ones stop after their current step.
 
-**What keeps going**: backups, the memory canary, consolidation, indexing, the self-model, the
+**What keeps going**: the tasks the owner scheduled (asked for at a time) --
+only `/pause all` skips a run whose moment passes, and lists it on resume: a price "at the
+open" delivered an hour late is wrong, so it is not delayed; backups, the memory canary, consolidation, indexing, the self-model, the
 evolution log, approval expiry -- housekeeping that protects data and never reaches anyone --
-and **reminders and the morning brief**, because he asked for those at a time. `/pause all`
+and **reminders and the morning brief**, for the same reason. `/pause all`
 holds them too: a reminder then arrives late on resume rather than never.
 
 A pause is one row (`storage/pauses.py`); what it cost is listed on `/resume`. `is_paused()` is
@@ -71,8 +71,8 @@ def is_paused(kind: str = WORK, *, now: float | None = None) -> bool:
 def tool_note(kind: str = WORK) -> str:
     """A sentence for the end of a scheduling tool's result when the thing just set up will
     not run because the owner has paused me (empty otherwise), so JARVIS never confirms "I'll
-    check hourly" while the check is on hold. `kind="all"`: for reminders, which only a
-    `/pause all` holds."""
+    check hourly" while the check is on hold. `kind="all"`: for reminders and the
+    scheduled tasks the owner set, which only a `/pause all` holds."""
     if not is_paused(kind):
         return ""
     what = "everything I do on my own" if kind == ALL else "my own work"
@@ -107,11 +107,12 @@ def _duration(seconds: float) -> str:
 
 
 _ON_HOLD = {
-    WORK: ("research, rumination, watches and forecast checks, scheduled and night tasks and new "
+    WORK: ("research, rumination, watches and forecast checks, night tasks and new "
            "background jobs are on hold, and anything running stops after its current step. "
-           "Reminders and the morning brief still arrive."),
+           "Reminders, the morning brief and scheduled tasks keep running; "
+           "only /pause all holds those."),
     ALL: ("everything I do on my own is on hold, including reminders and the morning brief. "
-          "Reminders and the brief arrive late when you resume; scheduled checks whose time "
+          "Reminders and the brief arrive late when you resume; scheduled tasks whose time "
           "passes are skipped."),
 }
 
@@ -120,7 +121,7 @@ def describe(row: dict, *, now: float | None = None) -> str:
     """One line for /status and /activity."""
     ts = time.time() if now is None else now
     until = f", until {_clock(row['until_at'])}" if row.get("until_at") else ", until you /resume"
-    scope = "everything" if row["scope"] == ALL else "work only (reminders and the brief still arrive)"
+    scope = "everything" if row["scope"] == ALL else "work only (reminders, the brief and your scheduled tasks still run)"
     why = f" -- {row['reason']}" if row.get("reason") else ""
     return f"PAUSED since {_clock(row['started_at'])}{until}; {scope}{why}."
 
@@ -149,7 +150,8 @@ def prompt_line(*, now: float | None = None) -> str:
         return ""
     return (f"{describe(row, now=now)} {_ON_HOLD[row['scope']]} Never say or imply that I am "
             "researching, watching or checking on my own while this stands, and when I set "
-            "something up, say that it waits.")
+            "up my own work, say that it waits. Scheduled tasks keep running "
+            "unless this is /pause all.")
 
 
 # ---------------------------------------------------------------------------

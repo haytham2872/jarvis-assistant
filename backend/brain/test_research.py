@@ -1399,3 +1399,12 @@ def test_a_held_note_is_not_a_candidate(tmp_path, monkeypatch):
     assert files == ["stoicism.md"]
     files = [c["file"] for c in asyncio.run(research._gather_candidates(now + 2 * 86400))]
     assert sorted(files) == ["content-as-dosing.md", "stoicism.md"]
+
+
+@pytest.fixture(autouse=True)
+def _every_note_is_world(monkeypatch):
+    """These tests are about scoring, cooldowns and vetoes, not kinds (see test_research_v2.py)."""
+    async def world(*a, **k):
+        return "world"
+    monkeypatch.setattr(research, "_known_kind", lambda *a, **k: "world")
+    monkeypatch.setattr(research, "kind_of", world)

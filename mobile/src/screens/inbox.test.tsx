@@ -25,6 +25,7 @@ jest.mock('react-native-screens/experimental', () => {
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 59, bottom: 34, left: 0, right: 0 }) }));
 
 const mockGet = jest.fn();
+const mockVote = jest.fn();
 jest.mock('../chat/client', () => {
   class HttpError extends Error {
     status: number;
@@ -33,7 +34,7 @@ jest.mock('../chat/client', () => {
       this.status = status;
     }
   }
-  return { HttpError, getInbox: (...a: unknown[]) => mockGet(...a) };
+  return { HttpError, getInbox: (...a: unknown[]) => mockGet(...a), sendInboxFeedback: (...a: unknown[]) => mockVote(...a) };
 });
 const { HttpError } = jest.requireMock('../chat/client') as { HttpError: new (s: number, m: string) => Error };
 
@@ -163,4 +164,30 @@ it('while the brief plays, its button stops it', async () => {
   await render(<Inbox />);
   expect(await screen.findByLabelText('Stop the brief')).toBeTruthy();
   expect(screen.getByLabelText('Stop reading this Morning brief')).toBeTruthy();
+});
+
+it('a research finding can be marked useful; tapping the chosen thumb clears it', async () => {
+  mockGet.mockResolvedValue(view([note({ id: 8, kind: 'research', text: 'A finding.', vote: null })]));
+  mockVote.mockImplementation(async (_c: unknown, _id: number, vote: string) => ({ vote: vote === 'none' ? null : vote }));
+  await render(<Inbox />);
+  await fireEvent.press(await screen.findByLabelText('Useful'));
+  expect(mockVote).toHaveBeenLastCalledWith(expect.anything(), 8, 'up');
+  expect(screen.getByLabelText('Useful').props.accessibilityState).toEqual(expect.objectContaining({ selected: true }));
+  await fireEvent.press(screen.getByLabelText('Useful'));
+  expect(mockVote).toHaveBeenLastCalledWith(expect.anything(), 8, 'none');
+  expect(screen.getByLabelText('Useful').props.accessibilityState).toEqual(expect.objectContaining({ selected: false }));
+  await fireEvent.press(screen.getByLabelText('Not useful'));
+  expect(mockVote).toHaveBeenLastCalledWith(expect.anything(), 8, 'down');
+});
+
+it('a failed vote is reverted with a short error line; other kinds have no thumbs', async () => {
+  mockGet.mockResolvedValue(view([note({ id: 8, kind: 'research', text: 'A finding.', vote: 'down' }), note({ id: 7, text: 'Brief.' })]));
+  mockVote.mockRejectedValue(new Error('offline'));
+  await render(<Inbox />);
+  await screen.findByText('Brief.');
+  expect(screen.getAllByLabelText('Useful')).toHaveLength(1);
+  await fireEvent.press(screen.getByLabelText('Useful'));
+  expect(await screen.findByText('Could not save that vote.')).toBeTruthy();
+  expect(screen.getByLabelText('Not useful').props.accessibilityState).toEqual(expect.objectContaining({ selected: true }));
+  expect(screen.getByLabelText('Useful').props.accessibilityState).toEqual(expect.objectContaining({ selected: false }));
 });

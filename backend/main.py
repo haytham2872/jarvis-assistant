@@ -580,6 +580,7 @@ async def _announce_cut_off_turns(started, runs: list[dict],
     G3: also the messages he sent during such a turn, which it was absorbing."""
     try:
         await started
+        await discord_bridge.wait_connected()   # a slow connection must not drop these
         for m in messages or []:
             preview = " ".join((m.get("text") or "").split())[:120]
             if preview:
@@ -601,6 +602,7 @@ async def _announce_interrupted_approvals(started, rows: list[dict]) -> None:
     tell the owner once Discord is up. Never retried -- an email may already have gone."""
     try:
         await started
+        await discord_bridge.wait_connected()   # a slow connection must not drop these
         await approval_flow.announce_interrupted(rows)
     except Exception as e:
         log.warning("Could not announce interrupted approvals: %s", e)
@@ -929,6 +931,10 @@ async def lifespan(app: FastAPI):
         approval_decider    = _decide_approval,
         approval_reply_handler = approval_flow.handle_reply,
     )
+    # The phone's /new and /trace act on the phone's own conversation, not Discord's.
+    from backend.brain import commands as _commands
+    _commands.set_channel_handler("/new", "mobile", mobile_new_session)
+    _commands.set_channel_handler("/trace", "mobile", lambda: tool_record.trace_text("mobile"))
     # P1: approval requests go out with Approve / Deny buttons, and what became of them is
     # written back onto the same message.
     approval_flow.set_notifier(discord_bridge.send_approval_request)

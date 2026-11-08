@@ -8,11 +8,13 @@ import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-nat
 
 import { AttachTray } from '../attach/AttachTray';
 import { sendable, type Pending } from '../attach/model';
-import { meterLevel } from '../core/api';
+import { meterLevel, type ServerConfig } from '../core/api';
 import { color, font, mono, space } from '../theme/tokens';
 import { Glass } from '../ui/Glass';
 import type { LevelBus } from '../voice/levels';
 import { useRecorder } from '../voice/useRecorder';
+import { runCommand } from './client';
+import { CommandSheet, commandError } from './CommandSheet';
 
 type Notice = { text: string; settings?: boolean };
 
@@ -41,6 +43,9 @@ type Props = {
   onRetryAttachment?: (id: string) => void;
   /** While JARVIS is writing an answer: stop it. */
   onStop?: () => void;
+  /** The command button and "/..." messages: the server to run them on, and where the reply goes. */
+  cfg?: ServerConfig | null;
+  onCommandReply?: (text: string, reply: string) => void;
 };
 
 const NOTICE_MS = 6_000;
@@ -110,6 +115,34 @@ export function Composer(p: Props) {
     setBusy(false);
   };
 
+  const [sheet, setSheet] = useState(false);
+  const { cfg, onCommandReply } = p;
+  /** Runs a slash command; true when it was one (a 400 means the server did not take it as one). */
+  const command = async (text: string): Promise<'ran' | 'failed' | 'plain'> => {
+    if (!cfg) return 'plain';
+    try {
+      onCommandReply?.(text, await runCommand(cfg, text));
+      return 'ran';
+    } catch (e) {
+      if ((e as { status?: unknown })?.status === 400) return 'plain';
+      setNotice({ text: commandError(e) });
+      return 'failed';
+    }
+  };
+  const send = async () => {
+    const text = p.draft.trim();
+    if (text.startsWith('/') && cfg && !sendable(p.attachments ?? []).ready.length) {
+      const r = await command(text);
+      if (r === 'ran') p.setDraft('');
+      if (r !== 'plain') return;
+    }
+    p.onSendText();
+  };
+  const runFromSheet = async (text: string) => {
+    setSheet(false);
+    await command(text);
+  };
+
   const hasText = !!p.draft.trim();
   const files = sendable(p.attachments ?? []);
   const canSend = hasText || files.ready.length > 0;
@@ -146,6 +179,9 @@ export function Composer(p: Props) {
         </View>
       ) : (
         <View style={styles.row}>
+          {cfg ? (
+            <RoundBtn symbol="command" label="Commands" onPress={() => setSheet(true)} tone="plain" disabled={!p.enabled} />
+          ) : null}
           {p.onAttach ? (
             <RoundBtn symbol="paperclip" label="Attach a photo or file" onPress={p.onAttach} tone="plain"
               disabled={!p.enabled || full} />
@@ -165,7 +201,7 @@ export function Composer(p: Props) {
           </Glass>
           {canSend ? (
             <RoundBtn symbol="arrow.up" label={files.busy ? 'Send (waiting for a file to upload)' : 'Send'}
-              onPress={p.onSendText} tone="accent" disabled={!p.enabled || files.busy} />
+              onPress={() => void send()} tone="accent" disabled={!p.enabled || files.busy} />
           ) : p.onStop ? (
             <RoundBtn symbol="stop.fill" label="Stop JARVIS" onPress={p.onStop} tone="accent" disabled={!p.enabled} />
           ) : (
@@ -180,6 +216,7 @@ export function Composer(p: Props) {
           )}
         </View>
       )}
+      {cfg ? <CommandSheet visible={sheet} cfg={cfg} onClose={() => setSheet(false)} onRun={(t) => void runFromSheet(t)} /> : null}
     </View>
   );
 }

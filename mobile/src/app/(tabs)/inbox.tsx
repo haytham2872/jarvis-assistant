@@ -8,7 +8,7 @@ import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, Sty
 import { SafeAreaView as TabSafeArea } from 'react-native-screens/experimental';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { getInbox } from '../../chat/client';
+import { getInbox, sendInboxFeedback } from '../../chat/client';
 import { Markdown } from '../../chat/Markdown';
 import type { InboxView, Notice } from '../../chat/types';
 import { describeFailure, ExplainedError } from '../../core/api';
@@ -30,6 +30,7 @@ function explain(e: unknown): string {
   return describeFailure(typeof err?.status === 'number' ? err.status : null, err?.message ?? '');
 }
 
+type Vote = 'up' | 'down' | null;
 type Row = { type: 'day'; key: string; title: string } | { type: 'notice'; key: string; notice: Notice };
 
 export default function Inbox() {
@@ -47,6 +48,9 @@ export default function Inbox() {
   const error = loadError ? explain(loadError) : '';
   const [filter, setFilter] = useState<Filter>('all');
   const [open, setOpen] = useState<Record<number, boolean>>({});
+  // The owner's thumbs on research findings: shown at once, put back if the server did not take them.
+  const [votes, setVotes] = useState<Record<number, Vote>>({});
+  const [voteError, setVoteError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [more, setMore] = useState(true);
   // What was new when he opened the tab stays marked new for this visit, though it is marked
@@ -100,6 +104,21 @@ export default function Inbox() {
   const filters = usedFilters(items);
   const route = ROUTES.find((r) => r.value === routeValue);
 
+  const voteOf = (n: Notice): Vote => (n.id in votes ? votes[n.id] : n.vote ?? null);
+  const vote = async (n: Notice, pressed: 'up' | 'down') => {
+    if (!cfg) return;
+    const before = voteOf(n);
+    const next = before === pressed ? null : pressed;
+    setVoteError('');
+    setVotes((v) => ({ ...v, [n.id]: next }));
+    try {
+      await sendInboxFeedback(cfg, n.id, next ?? 'none');
+    } catch {
+      setVotes((v) => ({ ...v, [n.id]: before }));
+      setVoteError('Could not save that vote.');
+    }
+  };
+
   const ask = (n: Notice) => router.navigate({ pathname: '/', params: replyParams(n) });
   const brief = todaysBrief(items);
   const playing = (n: Notice) => speaker.state.source === speechSource(n) && speaker.state.phase !== 'idle';
@@ -136,6 +155,7 @@ export default function Inbox() {
               ) : null}
               {error ? <Text style={styles.error}>{error}</Text> : null}
               {stale ? <Text style={styles.dim}>{stale}</Text> : null}
+              {voteError ? <Text style={styles.error}>{voteError}</Text> : null}
               {filters.length > 2 ? (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
                   {filters.map((f) => (
@@ -166,7 +186,8 @@ export default function Inbox() {
                 onPlay={() => speaker.toggle(speechSource(item.notice), item.notice.text)}
                 open={!!open[item.notice.id]}
                 onToggle={() => setOpen((o) => ({ ...o, [item.notice.id]: !o[item.notice.id] }))}
-                onAsk={() => ask(item.notice)} />
+                onAsk={() => ask(item.notice)}
+                vote={voteOf(item.notice)} onVote={(v) => void vote(item.notice, v)} />
             )}
         />
       </TabSafeArea>
@@ -174,8 +195,9 @@ export default function Inbox() {
   );
 }
 
-export function NoticeCard({ notice: n, isNew, playing, onPlay, open, onToggle, onAsk }: {
+export function NoticeCard({ notice: n, isNew, playing, onPlay, open, onToggle, onAsk, vote = null, onVote }: {
   notice: Notice; isNew: boolean; playing: boolean; onPlay: () => void; open: boolean; onToggle: () => void; onAsk: () => void;
+  vote?: Vote; onVote?: (v: 'up' | 'down') => void;
 }) {
   const long = isLong(n);
   const accent = tone(n.kind);
@@ -207,6 +229,13 @@ export function NoticeCard({ notice: n, isNew, playing, onPlay, open, onToggle, 
               <Text style={styles.link}>Open Today</Text>
             </Pressable>
           ) : null}
+          {n.kind === 'research' && onVote ? (['up', 'down'] as const).map((v) => (
+            <Pressable key={v} accessibilityRole="button" accessibilityLabel={v === 'up' ? 'Useful' : 'Not useful'}
+              accessibilityState={{ selected: vote === v }} hitSlop={8} onPress={() => onVote(v)}
+              style={[styles.thumb, vote === v && styles.thumbOn]}>
+              <Text style={styles.thumbText}>{v === 'up' ? '👍' : '👎'}</Text>
+            </Pressable>
+          )) : null}
           <Pressable accessibilityRole="button" accessibilityLabel={`Ask about this ${kindLabel(n.kind)}`} onPress={onAsk}>
             <Glass tone="blue" interactive style={styles.ask}><Text style={styles.askText}>Ask about this</Text></Glass>
           </Pressable>
@@ -248,6 +277,12 @@ const styles = StyleSheet.create({
   folded: { maxHeight: 156, overflow: 'hidden' },
   actions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: space.s4, marginTop: space.s1 },
   link: { color: color.stIdle, fontSize: font.label, fontWeight: '600' },
+  thumb: {
+    borderRadius: 16, height: 32, minWidth: 32, alignItems: 'center', justifyContent: 'center',
+    borderColor: color.border, borderWidth: StyleSheet.hairlineWidth, opacity: 0.65,
+  },
+  thumbOn: { borderColor: color.stIdle, borderWidth: 1.5, opacity: 1 },
+  thumbText: { fontSize: font.read },
   ask: { borderRadius: 16, height: 32, paddingHorizontal: space.s3, justifyContent: 'center' },
   askText: { color: color.tHi, fontSize: font.label, fontWeight: '600' },
   empty: { gap: space.s2, paddingTop: space.s5 },

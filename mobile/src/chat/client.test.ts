@@ -3,7 +3,7 @@ import {
   answerGoal, controlGoal, decideGoalProposal, fetchClipBytes, getActivity, getGoalFile, getPortfolio, getSpeechPlan, getToday,
   HttpError, pauseWork, raiseGoalBudget, resumeWork, sendVoice, tapBlock, transcribeGoalAnswer,
   addWeekBlock, applyWeek, getWeek, moveWeekBlock, undoWeek,
-  getRecord, getOvernight, getVaultNote, getHub,
+  getRecord, getOvernight, getVaultNote, getHub, getCommands, runCommand,
 } from './client';
 import { empty as emptyRecord } from '../record/fixtures';
 
@@ -187,4 +187,35 @@ it('reads the portfolio with the token', async () => {
   expect((await getPortfolio(cfg)).positions).toEqual([]);
   expect(fetchMock.mock.calls[0][0]).toBe('https://jarvis.example/mobile/v1/portfolio');
   expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer tok');
+});
+
+describe('commands', () => {
+  const list = { commands: [{ name: '/pace', usage: '/pace [off|low]', description: 'pace', choices: ['off', 'low'] }] };
+
+  it('fetches the command list once per session and server', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(json(200, list)); global.fetch = fetchMock as unknown as typeof fetch;
+    const other = { baseUrl: 'https://cmds-once.example', token: 'tok' };
+    expect(await getCommands(other)).toEqual(list.commands);
+    await getCommands(other);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://cmds-once.example/mobile/v1/commands');
+  });
+
+  it('does not cache a failure', async () => {
+    const other = { baseUrl: 'https://cmds-fail.example', token: 'tok' };
+    global.fetch = jest.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
+    await expect(getCommands(other)).rejects.toThrow();
+    global.fetch = jest.fn().mockResolvedValue(json(200, list)) as unknown as typeof fetch;
+    expect(await getCommands(other)).toEqual(list.commands);
+  });
+
+  it('posts the text and returns the reply; 400 is an HttpError', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(json(200, { reply: 'Pace set to low' }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    expect(await runCommand(cfg, '/pace low')).toBe('Pace set to low');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://jarvis.example/mobile/v1/command');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ text: '/pace low' });
+    global.fetch = jest.fn().mockResolvedValue(json(400, { detail: 'not a command' })) as unknown as typeof fetch;
+    await expect(runCommand(cfg, 'hello')).rejects.toMatchObject({ status: 400 });
+  });
 });

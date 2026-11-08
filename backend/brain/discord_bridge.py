@@ -62,6 +62,7 @@ from typing import Awaitable, Callable, Optional
 
 from backend.storage import delivery as _delivery
 from backend.storage import discord_messages as _discord_messages
+from backend.brain import commands as _commands
 from backend.brain import discord_claim as _claim
 from backend.brain import discord_context as _discord_context
 from backend.tasks import spawn
@@ -72,9 +73,13 @@ _BOT_TOKEN  = os.getenv("DISCORD_BOT_TOKEN", "")
 _ALLOWED_ID = os.getenv("DISCORD_ALLOWED_USER_ID", "")
 
 _MAX_MESSAGE_CHARS = 1900   # Discord's real cap is 2000; leave headroom
-_READY_TIMEOUT      = 15.0  # seconds to wait for the gateway connection to come up
+# How long start() waits for the first connection before returning (startup goes on;
+# the connection keeps trying in the background). Not a give-up point: on 6 November
+# 2026 a 15 s give-up closed a connection that was 3 s from ready, and nothing retried.
+_READY_TIMEOUT      = 60.0
+_RETRY_DELAYS_S     = (30.0, 60.0, 120.0, 300.0, 600.0)  # after a failed or lost connection
 
-# Single source of truth for "/commands" -- and for CLAUDE.md's "Discord Commands
+# Single source of truth for "/commands" (the list itself lives in backend/brain/commands.py) -- and for CLAUDE.md's "Discord Commands
 # — quick reference" section, which should read the same as this list. Live
 # incident (2026-09-06): JARVIS had no way to answer "what commands do you have?"
 # in normal conversation, since each command's description lived under whichever
@@ -82,28 +87,7 @@ _READY_TIMEOUT      = 15.0  # seconds to wait for the gateway connection to come
 # self-model could actually reach. Update BOTH this list and that CLAUDE.md
 # section together when adding a command -- they're meant to say the same thing,
 # but nothing enforces that automatically, so treat a drift between them as a bug.
-_COMMAND_HELP: list[tuple[str, str]] = [
-    ("/new", "start a brand-new session from the next message"),
-    ("/stop", "stop the answer I'm writing right now"),
-    ("/pace [off|low|normal|high]", "show or set the research loop's pace"),
-    ("/status", "uptime, the model, background tasks, memory health, cost"),
-    ("/cost", "session cost breakdown by model"),
-    ("/about", "the showcase pitch (who I am, what I do)"),
-    ("/brief [HH:MM|on|off|now]", "show/set the morning brief, or send it now"),
-    ("/rules [drop N]", "the standing rules I hold myself to, or drop one"),
-    ("/record", "my forecasting track record: score, calibration, recent calls"),
-    ("/pause [hours] [all]", "stop my own work for a while (all: reminders and the brief too)"),
-    ("/resume", "end the pause and list what it skipped"),
-    ("/activity", "what I'm running, waiting on and have scheduled"),
-    ("/plan [week|stats]", "today's plan and the week, and how each block went"),
-    ("/goals [id]", "the goals I'm working on, or one in detail"),
-    ("/goal <id> pause|resume|cancel", "pause, resume or stop one goal"),
-    ("/portfolio [ticker|stats]", "recorded holdings, dated value/P&L, theses and their history"),
-    ("/trace", "what my tools did in our conversation"),
-    ("/skills", "my procedures for tasks that come back"),
-    ("/skill <name> [details]", "run one now; /skill export <name> sends its file, /skill undo takes back a change"),
-    ("/commands", "this list"),
-]
+_COMMAND_HELP: list[tuple[str, str]] = _commands.COMMAND_HELP
 
 
 def _commands_text() -> str:
@@ -138,6 +122,34 @@ _transcribe_handler:  Optional[TranscribeHandler] = None
 
 _client = None        # discord.Client, set only once start() confirms a live connection
 _client_task: Optional[asyncio.Task] = None
+_supervisor: Optional[asyncio.Task] = None
+_stopping = False
+# What /status and the phone report: off (not configured), connecting, connected, down.
+_link: dict = {"state": "off", "error": "", "retry_at": 0.0}
+
+
+async def wait_connected(timeout: float = 6 * 3600.0) -> bool:
+    """Wait until the bridge is connected (True), or not configured / stopped / timed out
+    (False). For the one-time startup notices: a connection made 70 s after a restart must
+    still carry them, now that a slow connection is left to finish rather than dropped."""
+    end = time.monotonic() + timeout
+    while _client is None:
+        if _link["state"] == "off" or time.monotonic() >= end:
+            return False
+        await asyncio.sleep(1.0)
+    return True
+
+
+def link_status() -> str:
+    """One line for [Runtime status]: '' when connected or not configured."""
+    state = _link["state"]
+    if state in ("off", "connected"):
+        return ""
+    if state == "connecting":
+        return "Discord: connecting"
+    wait = max(0, int(_link["retry_at"] - time.time()))
+    why = f" ({_link['error']})" if _link["error"] else ""
+    return f"Discord: DOWN{why}, retrying in {wait // 60} min {wait % 60} s"
 
 
 def set_turn_handler(fn: TurnHandler) -> None:
@@ -1001,203 +1013,6 @@ def _build_client():
                 await message.channel.send(reply)
                 return
 
-            if text.lower() == "/new":
-                if _new_session_handler is None:
-                    return
-                try:
-                    reply = _new_session_handler()
-                except Exception as e:
-                    log.error("Discord: /new failed: %s", e)
-                    reply = "Couldn't start a new conversation -- check the backend log."
-                await message.channel.send(reply)
-                return
-
-            if text.lower().startswith("/pace"):
-                if _pace_handler is None:
-                    return
-                try:
-                    reply = _pace_handler(text[len("/pace"):].strip())
-                except Exception as e:
-                    log.error("Discord: /pace failed: %s", e)
-                    reply = "Couldn't change the pace -- check the backend log."
-                await message.channel.send(reply)
-                return
-
-            if text.lower() == "/status":
-                if _status_handler is None:
-                    return
-                try:
-                    reply = _status_handler()
-                except Exception as e:
-                    log.error("Discord: /status failed: %s", e)
-                    reply = "Couldn't get runtime status -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
-            if text.lower() == "/cost":
-                if _cost_handler is None:
-                    return
-                try:
-                    reply = _cost_handler()
-                except Exception as e:
-                    log.error("Discord: /cost failed: %s", e)
-                    reply = "Couldn't get session cost -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
-            if text.lower() == "/commands":
-                await _send_reply(message.channel, _commands_text())
-                return
-
-            if text.lower() == "/about":
-                if _pitch_handler is None:
-                    return
-                try:
-                    reply = _pitch_handler()
-                except Exception as e:
-                    log.error("Discord: /about failed: %s", e)
-                    reply = "Couldn't get the pitch -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
-            if text.lower().startswith("/brief"):
-                arg = text[len("/brief"):].strip()
-                if arg.lower() == "now":
-                    if _brief_now_handler is None:
-                        return
-                    try:
-                        async with _typing(message.channel):
-                            await _brief_now_handler(
-                                lambda text: _send_reply(message.channel, text))
-                    except Exception as e:
-                        log.error("Discord: /brief now failed: %s", e)
-                        await _send_reply(message.channel,
-                                          "Couldn't compose the brief -- check the backend log.")
-                    return
-                if _brief_handler is None:
-                    return
-                try:
-                    reply = _brief_handler(arg)
-                except Exception as e:
-                    log.error("Discord: /brief failed: %s", e)
-                    reply = "Couldn't update the brief config -- check the backend log."
-                await message.channel.send(reply)
-                return
-
-            if text.lower() == "/rules" or text.lower().startswith("/rules "):
-                if _rules_handler is None:
-                    return
-                try:
-                    reply = _rules_handler(text[len("/rules"):].strip())
-                except Exception as e:
-                    log.error("Discord: /rules failed: %s", e)
-                    reply = "Couldn't read the rules -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
-            if text.lower() == "/record":
-                if _record_handler is None:
-                    return
-                try:
-                    reply = _record_handler()
-                except Exception as e:
-                    log.error("Discord: /record failed: %s", e)
-                    reply = "Couldn't read the forecast record -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
-            # P2: the off switch and the view. Handled here, before any turn, so they work
-            # while a turn is running.
-            for word, name in (("/pause", "pause"), ("/resume", "resume")):
-                if text.lower() == word or text.lower().startswith(word + " "):
-                    handler = _pause_handler if name == "pause" else _resume_handler
-                    if handler is None:
-                        return
-                    try:
-                        reply = handler(text[len(word):].strip())
-                    except Exception as e:
-                        log.error("Discord: %s failed: %s", word, e)
-                        reply = f"Couldn't {name} -- check the backend log."
-                    await _send_reply(message.channel, reply)
-                    return
-
-            if text.lower() == "/portfolio" or text.lower().startswith("/portfolio "):
-                if _portfolio_handler is None:
-                    return
-                try:
-                    reply = _portfolio_handler(text[len("/portfolio"):].strip())
-                except Exception as e:
-                    log.error("Discord: /portfolio failed: %s", e)
-                    reply = "Couldn't read the portfolio -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
-            if text.lower() == "/trace":
-                if _trace_handler is None:
-                    return
-                try:
-                    reply = _trace_handler()
-                except Exception as e:
-                    log.error("Discord: /trace failed: %s", e)
-                    reply = "Couldn't read the tool receipts -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
-            if text.lower() == "/plan" or text.lower().startswith("/plan "):
-                if _plan_handler is None:
-                    return
-                try:
-                    reply = _plan_handler(text[len("/plan"):].strip())
-                except Exception as e:
-                    log.error("Discord: /plan failed: %s", e)
-                    reply = "Couldn't read the plan -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
-            if text.lower() == "/goal" or text.lower().startswith("/goal "):
-                if _goal_control_handler is None:
-                    return
-                try:
-                    reply = await _goal_control_handler(text[len("/goal"):].strip())
-                except Exception as e:
-                    log.error("Discord: /goal failed: %s", e)
-                    reply = "Couldn't change that goal -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
-            if text.lower() == "/goals" or text.lower().startswith("/goals "):
-                if _goals_handler is None:
-                    return
-                try:
-                    reply = _goals_handler(text[len("/goals"):].strip())
-                except Exception as e:
-                    log.error("Discord: /goals failed: %s", e)
-                    reply = "Couldn't read the goals -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
-            if text.lower() == "/skills" or text.lower().startswith("/skills "):
-                if _skills_handler is None:
-                    return
-                try:
-                    reply = _skills_handler(text[len("/skills"):].strip())
-                except Exception as e:
-                    log.error("Discord: /skills failed: %s", e)
-                    reply = "Couldn't read my skills -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
-            if text.lower() == "/skill undo" or text.lower().startswith("/skill undo "):
-                if _skill_undo_handler is None:
-                    return
-                try:
-                    reply = _skill_undo_handler(text[len("/skill undo"):].strip())
-                except Exception as e:
-                    log.error("Discord: /skill undo failed: %s", e)
-                    reply = "Couldn't undo that -- check the backend log."
-                await _send_reply(message.channel, reply)
-                return
-
             if text.lower().startswith("/skill export"):
                 if _skill_export_handler is None:
                     return
@@ -1220,15 +1035,16 @@ def _build_client():
                     await message.channel.send(f"Couldn't send the file ({how}).")
                 return
 
-            if text.lower() == "/activity":
-                if _activity_handler is None:
-                    return
-                try:
-                    reply = _activity_handler()
-                except Exception as e:
-                    log.error("Discord: /activity failed: %s", e)
-                    reply = "Couldn't read my activity -- check the backend log."
-                await _send_reply(message.channel, reply)
+            if " ".join(text.lower().split()) == "/brief now":
+                async with _typing(message.channel):
+                    reply = await _commands.dispatch(
+                        text, channel="discord",
+                        deliver=lambda part: _send_reply(message.channel, part))
+            else:
+                reply = await _commands.dispatch(text, channel="discord")
+            if reply is not None:
+                if reply:
+                    await _send_reply(message.channel, reply)
                 return
 
             # P1: "yes 12" / "no 12" answers an approval request. Only that exact shape, and
@@ -1534,16 +1350,18 @@ async def _accept_claim(message) -> None:
 # ---------------------------------------------------------------------------
 
 async def start() -> None:
-    """Connect to Discord's gateway as a background task inside the existing
-    asyncio event loop.
+    """Connect to Discord's gateway in the background, and keep it connected.
 
-    No-ops silently if DISCORD_BOT_TOKEN / DISCORD_ALLOWED_USER_ID aren't
-    configured, or if anything about connecting fails (bad token, no network,
-    package not installed, connection timeout) -- same contract as every
-    other optional integration in this codebase (ElevenLabs, Spotify, the
-    wake-word detector).
+    No-op when DISCORD_BOT_TOKEN isn't set. Otherwise a supervisor task owns the
+    connection for the life of the process: a connection that fails or is lost is
+    retried after _RETRY_DELAYS_S, never given up on. start() waits up to
+    _READY_TIMEOUT for the first connection so the startup notices that follow it
+    can be sent, then returns either way -- a slow connection is left to finish.
+
+    Until 6 November 2026 a connection not ready within 15 s was closed and never
+    retried: the server ran a day without Discord while the phone app worked.
     """
-    global _client, _client_task
+    global _supervisor, _stopping
     if not _BOT_TOKEN:
         log.info("Discord bridge: not configured (DISCORD_BOT_TOKEN unset) -- skipping.")
         return
@@ -1555,70 +1373,100 @@ async def start() -> None:
             "yourself the owner, send the bot this DM: /claim %s  (works once; a "
             "restart makes a new code)", _claim.open_claim()
         )
+    if _supervisor is not None and not _supervisor.done():
+        return
+    _stopping = False
+    _link.update(state="connecting", error="", retry_at=0.0)
+    _supervisor = spawn(_supervise(), name="discord-supervisor")
+    deadline = time.monotonic() + _READY_TIMEOUT
+    while _client is None and time.monotonic() < deadline and not _supervisor.done():
+        await asyncio.sleep(0.2)
+    if _client is None:
+        log.warning("Discord bridge: not connected after %.0f s -- still trying in the background.",
+                    _READY_TIMEOUT)
+
+
+async def _supervise() -> None:
+    """Connect, and reconnect whenever the connection ends, until stop()."""
+    failures = 0
+    while not _stopping:
+        became_ready, error = await _connect_once()
+        if _stopping:
+            return
+        failures = 0 if became_ready else failures + 1
+        delay = _RETRY_DELAYS_S[min(max(failures - 1, 0), len(_RETRY_DELAYS_S) - 1)]
+        _link.update(state="down", error=error, retry_at=time.time() + delay)
+        log.warning("Discord bridge: connection %s (%s) -- retrying in %.0f s.",
+                    "lost" if became_ready else "failed", error or "no error given", delay)
+        await asyncio.sleep(delay)
+        _link.update(state="connecting")
+
+
+async def _connect_once() -> tuple[bool, str]:
+    """Run one client until its connection ends. Returns (became_ready, error).
+
+    discord.py's own client.start() already resumes ordinary drops; it ends only on
+    something it cannot recover from (a bad token, the network gone at login), and
+    that is what this returns for. The client is never closed while it is still
+    connecting."""
+    global _client, _client_task
+    became_ready = False
+    error = ""
+    client = None
     try:
         client = _build_client()
-        # Client.start() runs for as long as the bot stays connected -- unlike
-        # Telegram's Updater.start_polling(), it does not return once
-        # connected, so it must run as its own background task. wait_until_ready()
-        # (bounded) is what lets start() itself confirm success and return.
         _client_task = asyncio.create_task(client.start(_BOT_TOKEN))
-
-        # wait_until_ready() raises RuntimeError("Client has not been properly
-        # initialised...") if called before client.start()'s task has had even
-        # one scheduling tick to run -- self._ready is only created a few
-        # lines into that coroutine. That's a startup race, not a real
-        # failure, so retry briefly instead of treating it as fatal. A
-        # genuine failure (bad token, network) surfaces differently: _ready
-        # DOES get created (it's pure local setup, no I/O), so
-        # wait_until_ready() then just hangs on it until our own timeout
-        # trips -- at which point the except block below checks whether
-        # _client_task has failed in the meantime and reports THAT instead.
-        deadline = time.monotonic() + _READY_TIMEOUT
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise asyncio.TimeoutError("Discord gateway did not become ready in time")
-            try:
-                await asyncio.wait_for(client.wait_until_ready(), timeout=remaining)
-                break
-            except RuntimeError:
-                await asyncio.sleep(0.1)
-        _client = client
-        reconciled = _delivery.reconcile_inflight()
-        if reconciled:
-            log.warning("Discord: %d in-flight reply part(s) have uncertain delivery", reconciled)
-        spawn(_resume_pending())
+        while not _client_task.done():
+            if not became_ready and client.is_ready():
+                became_ready = True
+                _client = client
+                _link.update(state="connected", error="", retry_at=0.0)
+                log.info("Discord bridge: connected.")
+                reconciled = _delivery.reconcile_inflight()
+                if reconciled:
+                    log.warning("Discord: %d in-flight reply part(s) have uncertain delivery", reconciled)
+                spawn(_resume_pending())
+            # Connected: just wait for the connection to end. Still connecting:
+            # look again for readiness every 0.2 s.
+            await asyncio.wait({_client_task}, timeout=None if became_ready else 0.2)
+        if _client_task.cancelled():
+            error = "cancelled"
+        else:
+            exc = _client_task.exception()
+            error = f"{type(exc).__name__}: {exc}".strip(": ") if exc else "connection closed"
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
-        # wait_until_ready()'s own error is often a generic "Client has not
-        # been properly initialised" message that masks what actually broke.
-        # If the underlying connection task already failed (bad token, wrong
-        # intents, network), ITS exception is the one that explains why --
-        # surface that instead when available.
-        real_error = e
-        if _client_task is not None and _client_task.done() and not _client_task.cancelled():
-            task_exc = _client_task.exception()
-            if task_exc is not None:
-                real_error = task_exc
-        log.warning("Discord bridge failed to start (%s) -- continuing without it.", real_error)
-        if _client_task is not None and not _client_task.done():
-            _client_task.cancel()
-        try:
-            await client.close()   # release the half-opened HTTP session cleanly
-        except Exception:
-            pass
-        _client = None
+        error = f"{type(e).__name__}: {e}"
+    finally:
+        if _client is client:
+            _client = None
         _client_task = None
+        if client is not None:
+            try:
+                await client.close()
+            except Exception:
+                pass
+    return became_ready, error
 
 
 async def stop() -> None:
-    """Disconnect gracefully. Safe to call even if start() was never called or failed."""
-    global _client, _client_task
-    if _client is None:
-        return
+    """Disconnect gracefully and stop reconnecting. Safe if start() never ran or failed."""
+    global _client, _client_task, _supervisor, _stopping
+    _stopping = True
+    client = _client
     try:
-        await _client.close()
+        if client is not None:
+            await client.close()
     except Exception as e:
         log.debug("Discord bridge stop: %s", e)
-    finally:
-        _client = None
-        _client_task = None
+    if _supervisor is not None and not _supervisor.done():
+        _supervisor.cancel()
+        try:
+            await _supervisor
+        except (asyncio.CancelledError, Exception):
+            pass
+    _supervisor = None
+    _client = None
+    _client_task = None
+    _link.update(state="off", error="", retry_at=0.0)

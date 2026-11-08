@@ -725,7 +725,7 @@ async def schedule_task(action: str, when: str = "", task: str = "", repeat: str
             return (f"Confirmed: {len(changed)} scheduled task(s) changed in jarvis-vault/schedule.md, "
                     f"same times; {what}:\n"
                     + "\n".join(f"- {_describe_task(t)}{_shift_note(t)}" for t, _ in changed)
-                    + pause.tool_note())
+                    + pause.tool_note(pause.ALL))
 
         if action != "add":
             return f"Error: unknown action '{action}'. Use 'add', 'list', 'update' or 'cancel'."
@@ -808,7 +808,7 @@ async def schedule_task(action: str, when: str = "", task: str = "", repeat: str
                 "task with live data and «owner» gets its answer on Discord.")
                 + (f" Each run follows the skill {skill} as it is at that moment, so improving "
                    "the skill improves every later run." if skill else "")
-                + pause.tool_note())
+                + pause.tool_note(pause.ALL))
     except Exception as e:
         log.warning("chronos: schedule_task failed: %s", e)
         return f"Error: scheduling unavailable ({e})"
@@ -938,7 +938,7 @@ def _trail(text: str, now: datetime.datetime) -> None:
 async def _fire_due_tasks(now: datetime.datetime) -> None:
     lines = _read_schedule()
     due = [t for t in (_parse_task_line(l) for l in lines) if t and t["due"] <= now]
-    paused = pause.is_paused("work")
+    paused = pause.is_paused("all")   # /pause holds my own work, not what the owner scheduled
 
     if due:
         # A04 slice 4: advance the schedule BEFORE anything awaits. Nothing between the
@@ -1353,7 +1353,12 @@ async def compose_brief(now: Optional[datetime.datetime] = None,
     skills_line = _collect_skills_overnight(now)
     goals_line = _collect_goals_line()
     reading_line = _collect_reading_line(now)
-    tail = "\n".join(l for l in (portfolio_line, skills_line, goals_line, reading_line) if l)
+    try:
+        from backend.brain import research
+        digest_line = research.digest_line(now.timestamp())
+    except Exception:
+        digest_line = ""
+    tail = "\n".join(l for l in (portfolio_line, skills_line, goals_line, reading_line, digest_line) if l)
 
     if not any([nights_text, research_trail, intents, reminders, calendar, plan_today, expensive, tail]):
         return f"Morning. Quiet night — nothing new overnight, nothing on the schedule for today. ({now.strftime('%A %H:%M')})"
@@ -1587,15 +1592,15 @@ def handle_brief_command(arg: str) -> str:
 
 async def _cycle() -> None:
     now = now_local()
-    # P2: a plain /pause holds the work (scheduled and night tasks) but reminders and the brief
-    # still arrive -- he asked for those at a time. /pause all holds them too; they then
+    # P2: a plain /pause holds my own work (night tasks) but reminders, the brief and the tasks
+    # the owner scheduled still run -- they asked for those at a time. /pause all holds them too; they then
     # arrive late on resume (an overdue reminder fires late rather than never, and the brief
     # goes out at-or-after its time), which is why nothing is dropped here.
     hold_all = pause.is_paused("all")
     hold_work = pause.is_paused("work")
     if not hold_all:
         await _fire_due_reminders(now)
-    await _fire_due_tasks(now)               # a paused run is skipped and recorded, not delayed
+    await _fire_due_tasks(now)               # only /pause all skips a run (recorded, not delayed)
 
     busy = _busy_check() if _busy_check is not None else False
     if not busy and not hold_work and in_night_window(now):

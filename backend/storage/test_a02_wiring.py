@@ -150,5 +150,6 @@ def test_dedup_is_wired_before_command_handling():
 
     src = inspect.getsource(discord_bridge)
     claim_at = src.index("if not _claim_ingress(message):")
-    new_cmd_at = src.index('if text.lower() == "/new":')
-    assert claim_at < new_cmd_at
+    # Commands (/new among them) are handled by commands.dispatch since 7 November 2026.
+    dispatch_at = src.index("commands.dispatch(")
+    assert claim_at < dispatch_at

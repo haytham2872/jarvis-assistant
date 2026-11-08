@@ -833,7 +833,9 @@ TOOLS = [
             "'what's in your research queue'). Use 'close' when «owner» says «he»'s had enough on a "
             "subject (e.g. 'you've researched Frankl enough') — this vetoes that subject and every "
             "note in its family from ever being auto-picked again, overriding any relevance score; "
-            "'reopen' undoes a close.")
+            "'reopen' undoes a close. On your own you research only world subjects (not «owner»'s life, "
+            "not yourself), a few a day; a subject that failed 3 times in a row is retired, which "
+            "'status' lists and 'add' or 'reopen' lifts. A deliberate 'add' runs whatever its kind.")
         ),
         "input_schema": {
             "type": "object",

@@ -89,6 +89,31 @@ async def ping(request: Request) -> dict:
             "host": platform.system(), "version": VERSION}
 
 
+@router.get("/commands")
+async def list_commands(request: Request) -> dict:
+    """The slash commands the phone can run, from the one list Discord uses."""
+    _authorize(request)
+    from backend.brain.commands import COMMANDS
+    return {"commands": [{"name": c.name, "usage": c.usage, "description": c.description,
+                          "choices": c.choices} for c in COMMANDS if c.phone]}
+
+
+@router.post("/command")
+async def run_command(request: Request) -> dict:
+    """Run one slash command, as Discord would. 400 when the text is not a command."""
+    _authorize(request)
+    from backend.brain.commands import dispatch
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    text = body.get("text") if isinstance(body, dict) else None
+    reply = await dispatch(text, channel="mobile") if isinstance(text, str) else None
+    if reply is None:
+        raise HTTPException(status_code=400, detail="not a command")
+    return {"reply": reply}
+
+
 async def _read_bounded(request: Request, limit: int) -> bytes:
     declared = request.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > limit:
@@ -896,9 +921,31 @@ async def get_inbox(request: Request, before: int | None = Query(None),
                     limit: int = Query(50, ge=1, le=200)) -> Response:
     """Every message JARVIS sent the owner on his own (brain/notices.py), newest first."""
     _authorize(request)
-    from backend.storage import notices as store
-    return _conditional(request, {"notices": store.listing(before, limit), "unread": store.unread_count(),
+    from backend.storage import notices as store, research_feedback
+    rows = store.listing(before, limit)
+    votes = research_feedback.vote_for([n["id"] for n in rows if n.get("kind") == "research"])
+    for n in rows:
+        if n.get("kind") == "research":
+            n["vote"] = votes.get(n["id"])
+    return _conditional(request, {"notices": rows, "unread": store.unread_count(),
                                   **_notice_settings(request)})
+
+
+@router.post("/inbox/feedback")
+async def inbox_feedback(request: Request) -> dict:
+    """{"id": int, "vote": "up" | "down" | "none"}: a thumb on a research finding."""
+    _authorize(request)
+    from backend.storage import research_feedback
+    try:
+        body = _json_object(await request.json())
+    except Exception:
+        body = {}
+    nid, vote = _notice_id(body.get("id")), body.get("vote")
+    if nid is None or vote not in ("up", "down", "none"):
+        raise HTTPException(status_code=400, detail='id and vote ("up", "down" or "none") are required')
+    if research_feedback.record(nid, vote) is None:
+        raise HTTPException(status_code=404, detail="that is not a research finding")
+    return {"vote": None if vote == "none" else vote}
 
 
 @router.post("/inbox/read")

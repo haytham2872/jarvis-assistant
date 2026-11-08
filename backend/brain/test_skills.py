@@ -445,8 +445,9 @@ def test_opening_a_skill_is_a_read_and_saving_one_is_his_own_space():
 def test_the_discord_commands_are_wired():
     from backend import main
     from backend.brain import discord_bridge
+    from backend.brain import commands
     src = inspect.getsource(discord_bridge)
-    assert 'text.lower() == "/skills"' in src and 'startswith("/skill export")' in src
+    assert '"/skills": ("_skills_handler"' in inspect.getsource(commands) and 'startswith("/skill export")' in src
     cmds = [c for c, _ in discord_bridge._COMMAND_HELP]
     assert "/skills" in cmds and any(c.startswith("/skill <name>") for c in cmds)
     msrc = inspect.getsource(main)

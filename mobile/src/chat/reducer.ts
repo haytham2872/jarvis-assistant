@@ -23,6 +23,8 @@ export type LocalRequest = {
   files?: FileChip[];
   /** Files the server could not read, in words. */
   problems?: string[];
+  /** A slash command run from the phone: only the phone has it, so a snapshot keeps it. */
+  local?: boolean;
 };
 
 export type Connection = 'connecting' | 'live' | 'offline';
@@ -63,6 +65,7 @@ export type ChatAction =
   | { type: 'snapshot'; snap: Snapshot }
   | { type: 'event'; evt: HubEvent }
   | { type: 'send'; request_id: string; text: string; at: number; files?: FileChip[] }
+  | { type: 'command'; request_id: string; text: string; reply: string; at: number }
   | { type: 'send_voice'; request_id: string; at: number; audio: string }
   | { type: 'heard_nothing'; request_id: string }
   | { type: 'sent'; status: RequestStatus }
@@ -168,7 +171,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const kept: Record<string, LocalRequest> = {};
       for (const id of next.order) {
         const r = next.requests[id];
-        if (r && !known.has(id) && (r.state === 'sending' || r.state === 'send_failed' || r.state === 'transcribing')) kept[id] = r;
+        if (r && !known.has(id) && (r.local || r.state === 'sending' || r.state === 'send_failed' || r.state === 'transcribing')) kept[id] = r;
       }
       const before = next.requests;
       next = { ...next, requests: kept, order: next.order.filter((id) => id in kept) };
@@ -195,6 +198,19 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           },
         },
         order: state.order.includes(action.request_id) ? state.order : [...state.order, action.request_id],
+      };
+
+    case 'command':
+      return {
+        ...state,
+        requests: {
+          ...state.requests,
+          [action.request_id]: {
+            request_id: action.request_id, text: action.text, sentAt: action.at, state: 'answered', answer: action.reply,
+            local: true,
+          },
+        },
+        order: [...state.order, action.request_id],
       };
 
     case 'send_voice':

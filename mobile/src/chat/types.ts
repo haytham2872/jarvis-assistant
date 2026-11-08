@@ -241,6 +241,8 @@ export type Notice = {
   id: number; ts: number; kind: NoticeKind | string; text: string;
   /** What became of the Discord copy: null = not sent there, true = sent, false = the send failed. */
   discord: boolean | null; read: boolean;
+  /** The owner's thumb on a research finding (only research messages carry it). */
+  vote?: 'up' | 'down' | null;
 };
 /** Where JARVIS's own messages go: Discord only (the default), both, or the phone only. */
 export type NoticeRoute = 'discord' | 'both' | 'phone';

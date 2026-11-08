@@ -286,7 +286,8 @@ def test_every_documented_command_is_still_handled():
     """'All command variants pass'. _COMMAND_HELP is what /commands replies with, so a
     command listed there but no longer handled would be a lie to Sam."""
     import inspect
-    src = inspect.getsource(db)
+    from backend.brain import commands
+    src = inspect.getsource(db) + inspect.getsource(commands)
     for cmd, _desc in db._COMMAND_HELP:
         bare = cmd.split()[0]
         assert bare in src, f"{bare} is advertised by /commands but not handled"

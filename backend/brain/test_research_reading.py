@@ -147,3 +147,12 @@ def test_opens_unavailable_means_no_signal(env, monkeypatch):
     monkeypatch.setattr(note_opens, "last_opened", boom)
     env.note("alpha.md")
     assert [c["days_unread"] for c in env.gather()] == [None]
+
+
+@pytest.fixture(autouse=True)
+def _every_note_is_world(monkeypatch):
+    """These tests are about scoring, cooldowns and vetoes, not kinds (see test_research_v2.py)."""
+    async def world(*a, **k):
+        return "world"
+    monkeypatch.setattr(research, "_known_kind", lambda *a, **k: "world")
+    monkeypatch.setattr(research, "kind_of", world)

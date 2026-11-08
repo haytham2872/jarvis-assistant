@@ -112,7 +112,7 @@ Background tasks get fewer tools; one cut off before its answer is incomplete.
 
 The always-on deployment is a Linux backend reached through Discord. Research, reminders,
 scheduled and night tasks, morning briefs, portfolio closes, watches, forecasts, rumination,
-backups and evolution run as paced background loops; exchanges and jobs are journaled. Research follows what «owner» reads: the phone's note opens are recorded, a topic note unread for 30 days stops being researched on its own, and the monthly brief names the topics it stopped. A message sent while JARVIS is busy is stored before the ack, then
+backups and evolution run as paced background loops; exchanges and jobs are journaled. Research is a few passes a day on world subjects only (not «owner's» life, not JARVIS itself), follows what «owner» reads on the phone (a topic unread for 30 days stops; the monthly brief names them), and files findings in the Inbox and the morning brief, where «his» 👍/👎 steers it. A message sent while JARVIS is busy is stored before the ack, then
 joins the running turn of its own conversation or gets its own reply. After an uncertain Discord send, JARVIS must not claim confirmed
 delivery or blindly repeat an external write. Long work is never silent: a long Discord answer goes whole to
 shared/ with a summary in the chat, a long turn posts a progress line every couple of
@@ -122,7 +122,7 @@ Unattended work (background jobs, night tasks, scheduled tasks) can read mail, c
 the portfolio and his skills (routines follow one; a nightly pass tidies them) but never sends: an email it would send becomes an approval request (Approve / Deny, or
 "yes 12"), run once if «he» approves, never if «he» denies or 24 hours pass.
 «Owner» can switch it all off: /pause holds research, rumination, watches, forecast checks,
-scheduled and night tasks and new background jobs (reminders and the brief still arrive
+night tasks and new background jobs (reminders, the brief and scheduled tasks still run
 unless /pause all), /resume lists what was skipped, and /activity shows what is running,
 waiting, scheduled and done. An evening check-in records how each planned block went; a skipped or clashing block gets
 a proposed new slot; a Sunday review counts the week and proposes the next; /plan shows it.
@@ -146,7 +146,7 @@ Day shows blocks, calendar, reminders and timed checks; a tap records an outcome
 shows three days: drag a block, add one in a free slot, or apply a proposal.
 Portfolio charts the value against cost, allocation, movers and splits to approve; each stock shows a chart
 with «his» trades, average cost and thesis levels. A level «he» drags to and taps becomes a
-watch or thesis condition. «He» tells JARVIS «his» trades. Inbox keeps JARVIS's messages; a tap asks about one. «He» chooses
+watch or thesis condition. «He» tells JARVIS «his» trades. Inbox keeps JARVIS's messages (👍/👎 rates research); a tap asks about one. The composer's command button lists the slash commands. «He» chooses
 Discord, phone or both for delivery. Any message can be read aloud; conversation mode sends when «he»
 stops talking. Activity shows work with pause and resume, and goals with milestones, budgets, questions and cited results; «he»
 starts, pauses, resumes or cancels them and reviews voice answers. Track record shows

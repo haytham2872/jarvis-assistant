@@ -221,7 +221,8 @@ def test_rules_command_is_wired():
     from backend import main
     from backend.brain import discord_bridge
     assert "rules_handler       = instructions.handle_rules_command" in inspect.getsource(main)
-    assert 'text.lower() == "/rules"' in inspect.getsource(discord_bridge)
+    from backend.brain import commands
+    assert '"/rules": ("_rules_handler"' in inspect.getsource(commands)
     assert any(cmd.startswith("/rules") for cmd, _ in discord_bridge._COMMAND_HELP)
 
 

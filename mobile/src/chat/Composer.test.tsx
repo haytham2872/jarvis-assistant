@@ -2,6 +2,16 @@ import { act, fireEvent, render, screen } from '@testing-library/react-native';
 
 import { Composer, elapsed } from './Composer';
 
+const mockRun = jest.fn();
+const mockCommands = jest.fn();
+jest.mock('./client', () => ({
+  getCommands: (...a: unknown[]) => mockCommands(...a), runCommand: (...a: unknown[]) => mockRun(...a),
+  HttpError: class HttpError extends Error {
+    status: number;
+    constructor(status: number, m: string) { super(m); this.status = status; }
+  },
+}));
+
 const mockRecorder = {
   start: jest.fn(), finish: jest.fn(), cancel: jest.fn(), active: false, ms: 0, metering: -30 as number | undefined,
 };
@@ -199,4 +209,54 @@ it('offers Stop instead of the mic while JARVIS is writing, and Send still works
   await view.rerender(<Composer {...base} onStop={undefined} draft="" />);
   expect(screen.queryByLabelText('Stop JARVIS')).toBeNull();
   expect(screen.getByLabelText('Record a voice message')).toBeTruthy();
+});
+
+describe('commands', () => {
+  const cfg = { baseUrl: 'https://j.example', token: 't' };
+  const list = [
+    { name: '/pace', usage: '/pace', description: 'pace', choices: ['low'] },
+    { name: '/about', usage: '/about', description: 'about', choices: [] },
+  ];
+  async function withCfg(draft = '') {
+    const props = { enabled: true, draft, setDraft: jest.fn(), onSendText: jest.fn(), onRecordStart: jest.fn(),
+      onRecording: jest.fn().mockResolvedValue(null), cfg, onCommandReply: jest.fn() };
+    await render(<Composer {...props} />);
+    return props;
+  }
+  beforeEach(() => mockCommands.mockResolvedValue(list));
+
+  it('opens the sheet from the command button, runs the chosen command and hands over the reply', async () => {
+    mockRun.mockResolvedValue('About text');
+    const props = await withCfg();
+    await act(async () => { await fireEvent.press(screen.getByLabelText('Commands')); });
+    await act(async () => { await fireEvent.press(screen.getByLabelText('/about')); });
+    expect(mockRun).toHaveBeenCalledWith(cfg, '/about');
+    expect(props.onCommandReply).toHaveBeenCalledWith('/about', 'About text');
+  });
+
+  it('sends typed text starting with / through the command route, not as a message', async () => {
+    mockRun.mockResolvedValue('Pace set to low');
+    const props = await withCfg('/pace low');
+    await act(async () => { await fireEvent.press(screen.getByLabelText('Send')); });
+    expect(mockRun).toHaveBeenCalledWith(cfg, '/pace low');
+    expect(props.onCommandReply).toHaveBeenCalledWith('/pace low', 'Pace set to low');
+    expect(props.onSendText).not.toHaveBeenCalled();
+    expect(props.setDraft).toHaveBeenCalledWith('');
+  });
+
+  it('falls back to a normal message when the server says it is not a command', async () => {
+    const { HttpError } = jest.requireMock('./client');
+    mockRun.mockRejectedValue(new HttpError(400, 'not a command'));
+    const props = await withCfg('/etc/hosts is a file');
+    await act(async () => { await fireEvent.press(screen.getByLabelText('Send')); });
+    expect(props.onSendText).toHaveBeenCalled();
+  });
+
+  it('shows an error line on a network failure, never a crash', async () => {
+    mockRun.mockRejectedValue(new Error('network down'));
+    const props = await withCfg('/pace low');
+    await act(async () => { await fireEvent.press(screen.getByLabelText('Send')); });
+    expect(screen.getByText(/Can't reach JARVIS/)).toBeTruthy();
+    expect(props.onCommandReply).not.toHaveBeenCalled();
+  });
 });

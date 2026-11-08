@@ -125,4 +125,5 @@ def test_the_digest_carries_what_he_must_know_about_unattended_work_and_pausing(
     main = sm._build_digest_from_claudemd()["main"]
     assert "never sends" in main and "approval request" in main
     assert "/pause" in main and "/resume" in main and "/activity" in main
-    assert "reminders and the brief still arrive" in main
+    # Scheduled tasks keep running under a plain /pause too.
+    assert "reminders, the brief and scheduled tasks still run" in main

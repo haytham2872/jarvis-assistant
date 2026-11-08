@@ -32,6 +32,7 @@ import json
 import datetime
 from zoneinfo import ZoneInfo
 import asyncio
+from contextvars import ContextVar
 import contextlib
 import logging
 from dataclasses import dataclass, field
@@ -282,10 +283,20 @@ def _with_skills(system: str, task_text: str) -> tuple[str, str]:
         return system, task_text
 
 
+# The kind of the job running in this task: a scheduled task is held only by
+# /pause all (a long /pause used to skip every run the owner had scheduled).
+_job_kind: ContextVar[str] = ContextVar("background_job_kind", default="agent")
+
+
+def _held(kind: str) -> bool:
+    """Whether a pause holds a job of this kind."""
+    return _pause.is_paused("all") if kind == "scheduled" else _pause.is_paused("work")
+
+
 def _stop_if_paused() -> None:
     """P2: called at the top of every step of every job loop. A pause is noticed within one
     step -- the current model call and its tool calls finish, the next does not start."""
-    if _pause.is_paused("work"):
+    if _held(_job_kind.get()):
         raise _pause.Paused()
 
 
@@ -716,11 +727,13 @@ def _job_payload(t: BgTask) -> dict:
 
 
 def _schedule_queued() -> None:
-    if _shutting_down or _pause.is_paused("work"):
-        return                        # P2: queued work waits for /resume (resume_queued)
+    if _shutting_down:
+        return
     for t in sorted(_tasks.values(), key=lambda item: item.id):
         if t.status != "queued" or slots_in_use() >= _MAX_CONCURRENT:
             continue
+        if _held(t.kind):
+            continue                  # P2: queued work waits for /resume (resume_queued)
         t.status = "running"          # reserve the slot before creating the task
         t._handle = asyncio.create_task(_worker(t))
 
@@ -746,6 +759,7 @@ async def _worker(t: BgTask) -> None:
         timeout = _DEEP_TIMEOUT if t.deep else _BG_TIMEOUT
         if t.kind == "web_research":
             timeout = tinyfish.RESEARCH_TIMEOUT_S.get(t.depth, _BG_TIMEOUT)
+        _job_kind.set(t.kind)
         with _own_run("background", t.description, run_id=t.job_id, kind=t.kind):
             if t.kind == "web_research":
                 summary = await asyncio.wait_for(_run_web_research(t), timeout=timeout)
@@ -1003,7 +1017,7 @@ async def _start(task: str, brief: str, *, deep: bool = False, notify: bool = Fa
                  occurrence: str = "", origin: str = "") -> tuple["BgTask | None", str]:
     """Admit one task. (task, "") on success, (None, "Error: ...") otherwise."""
     global _next_id
-    if _pause.is_paused("work"):
+    if _held(kind):
         return None, (_owner.say("Error: «Owner» has paused my work on my own (/pause), so no new background "
                       "work starts until «he» sends /resume. Tell «him» it is on hold, and do what "
                       "you can in this conversation instead."))

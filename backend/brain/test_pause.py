@@ -62,7 +62,7 @@ def test_a_bare_pause_holds_until_resume():
     reply = pause.handle_pause_command("")
     row = pauses.active()
     assert row["scope"] == "work" and row["until_at"] is None
-    assert "until you /resume" in reply and "Reminders and the morning brief still arrive" in reply
+    assert "until you /resume" in reply and "scheduled tasks keep running" in reply
 
 
 @pytest.mark.parametrize("arg,hours", [("3", 3), ("3h", 3), ("1.5", 1.5), ("0,5", 0.5), ("2H", 2)])
@@ -234,7 +234,7 @@ def test_status_line_is_empty_unless_paused_and_then_says_what_is_held():
     pause.handle_pause_command("3 travelling")
     line = pause.status_line()
     assert line.startswith("PAUSED since") and "until " in line and "travelling" in line
-    assert "reminders and the brief still arrive" in line
+    assert "your scheduled tasks still run" in line
     pause.handle_pause_command("all")
     assert "everything" in pause.status_line()
 
@@ -371,7 +371,7 @@ def test_prompt_line_is_empty_unless_paused():
     assert pause.prompt_line() == ""
     pauses.start(pauses.WORK)
     line = pause.prompt_line()
-    assert line.startswith("PAUSED since") and "Reminders and the morning brief still arrive" in line
+    assert line.startswith("PAUSED since") and "scheduled tasks keep running" in line
     assert "Never say or imply that I am researching, watching or checking on my own" in line
     pauses.end("test")
     assert pause.prompt_line() == ""

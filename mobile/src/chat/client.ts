@@ -45,6 +45,27 @@ async function call<T>(cfg: ServerConfig, path: string, init: RequestInit = {}, 
 
 export const getSnapshot = (cfg: ServerConfig) => call<Snapshot>(cfg, '/snapshot');
 
+export type CommandInfo = { name: string; usage: string; description: string; choices: string[] };
+
+// The list only changes with a server release: one fetch per server for the life of the app.
+const commandCache = new Map<string, Promise<CommandInfo[]>>();
+
+/** GET /commands, cached for the session (a failure is not cached). */
+export function getCommands(cfg: ServerConfig): Promise<CommandInfo[]> {
+  const key = `${cfg.baseUrl}|${cfg.token}`;
+  let hit = commandCache.get(key);
+  if (!hit) {
+    hit = call<{ commands: CommandInfo[] }>(cfg, '/commands').then((r) => r.commands);
+    commandCache.set(key, hit);
+    hit.catch(() => commandCache.delete(key));
+  }
+  return hit;
+}
+
+/** POST /command: runs a slash command and returns its reply (HttpError 400: not a command). */
+export const runCommand = (cfg: ServerConfig, text: string) =>
+  call<{ reply: string }>(cfg, '/command', { method: 'POST', body: JSON.stringify({ text }) }).then((r) => r.reply);
+
 /** `replyTo`: the Inbox message he is answering (slice 4); the turn is shown it. */
 export const sendMessage = (cfg: ServerConfig, request_id: string, text: string, input: 'text' | 'voice' = 'text',
   replyTo?: number, uploads?: string[]) =>
@@ -227,6 +248,10 @@ export const applyWeek = (cfg: ServerConfig, context: WeekContext, week: string,
 // ------------------------------------------------------------------ slice 4: Inbox and notifications
 
 const pushHeader = (token?: string | null): Record<string, string> => (token ? { 'X-Push-Token': token } : {});
+
+/** POST /inbox/feedback: a thumb on a research finding ('none' clears it). */
+export const sendInboxFeedback = (cfg: ServerConfig, id: number, vote: 'up' | 'down' | 'none') =>
+  call<{ vote: 'up' | 'down' | null }>(cfg, '/inbox/feedback', { method: 'POST', body: JSON.stringify({ id, vote }) });
 
 /** GET /inbox: JARVIS's own messages, newest first; `before` pages back. */
 export function getInbox(cfg: ServerConfig, pushToken?: string | null, opts: { before?: number; limit?: number } = {}, cache?: Conditional<InboxView>) {

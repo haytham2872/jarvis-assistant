@@ -44,7 +44,7 @@ const HEADER_ORB = 40;              // slice 6: the neural orb as a badge beside
 export default function Conversation() {
   const insets = useSafeAreaInsets();
   const { cfg, checked, prefs, levels, recording, setRecording, speaker, chat, reload } = useApp();
-  const { state, send, sendRecording, warmUp, retry, startNewChat, decide, stop } = chat;
+  const { state, send, sendRecording, warmUp, retry, startNewChat, decide, stop, showCommand } = chat;
   const [draft, setDraft] = useState('');
   const params = useLocalSearchParams<{ record?: string; draft?: string; reply?: string; replyLabel?: string; replyText?: string }>();
   // Slice 4: "Ask about this" in the Inbox. The next message (typed or spoken) answers that one.
@@ -193,7 +193,7 @@ export default function Conversation() {
           )}
           <ApprovalTray approvals={waiting} onDecide={decide} />
           {replyTo ? <ReplyChip label={replyTo.label} text={replyTo.text} onClear={() => setReplyTo(null)} /> : null}
-          <Composer enabled={!!cfg} draft={draft} setDraft={setDraft} onSendText={onSend}
+          <Composer cfg={cfg} onCommandReply={showCommand} enabled={!!cfg} draft={draft} setDraft={setDraft} onSendText={onSend}
             onRecordStart={onRecordStart} onRecording={onRecording} levels={levels} onActiveChange={setRecording}
             autoStart={autoRecord} onAutoStarted={() => setAutoRecord(false)}
             onConversation={() => { speaker.stop(); setTalking(true); }}

@@ -221,6 +221,15 @@ def runtime_status_text() -> str:
         log.debug("runtime_status: pause state unavailable: %s", e)
         _pause_line = ""
 
+    # The Discord link: shown only while it is connecting or down (6 November 2026: it
+    # was down a day while the phone worked, and nothing said so).
+    try:
+        from backend.brain import discord_bridge as _bridge
+        _discord_link = _bridge.link_status()
+    except Exception as e:
+        log.debug("runtime_status: discord link unavailable: %s", e)
+        _discord_link = ""
+
 
     lines = [
         "[Runtime status]",
@@ -231,6 +240,7 @@ def runtime_status_text() -> str:
         f"Turns today: {turns_today()}",
         f"Background tasks: {running} running, {finished} completed/recovered"
         f", {queued} queued",
+        *( [_discord_link] if _discord_link else [] ),
         *( [f"Discord replies: {delivery_pending} pending, {delivery_uncertain} uncertain "
             "(check backend log before retrying uncertain parts)"]
            if delivery_pending or delivery_uncertain else [] ),
